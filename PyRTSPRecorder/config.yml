@@ -1,10 +1,9 @@
-output_folder: ./recordings
-segment_duration: 60  
-log_file: record_rtsp.log 
+segment_duration: 30
+log_file: ./logs/record_rtsp.log
 cameras:
   - name: Camera1
-    rtsp_url: rtsp://admin:password@192.168.1.10:554/stream
+    rtsp_url: rtsp://cam.stream/1
+    output_folder: ./recordings/camera1  
   - name: Camera2
-    rtsp_url: rtsp://admin:password@192.168.1.11:554/stream
-  - name: Camera3
-    rtsp_url: rtsp://admin:password@192.168.1.12:554/stream
+    rtsp_url: rtsp://cam.stream/2
+    output_folder: ./recordings/camera2  
