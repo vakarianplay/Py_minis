@@ -1,49 +1,124 @@
-import subprocess
 import os
 import time
+import yaml
+import logging
+import subprocess
+from threading import Thread
 
-def record_rtsp(rtsp_url, output_folder, segment_time=60):
-    """
-    Запись RTSP потока с аудио в MP4 файлы длительностью по 1 минуте.
 
-    Аргументы:
-        rtsp_url (str): URL RTSP потока.
-        output_folder (str): Папка для сохранения видеофайлов.
-        segment_time (int): Длительность каждого сегмента в секундах (по умолчанию 60 секунд).
-    """
-    # Убедимся, что папка существует
-    os.makedirs(output_folder, exist_ok=True)
+def setup_global_logging(log_file):
+    log_dir = os.path.dirname(log_file)
+    if log_dir and not os.path.exists(log_dir):
+        os.makedirs(log_dir)
 
-    # Команда ffmpeg
-    ffmpeg_command = [
-        "ffmpeg",
-        "-hide_banner",  # Убираем лишний вывод
-        "-loglevel", "error",  # Оставляем только ошибки для логов
-        "-i", rtsp_url,  # URL RTSP-потока
-        "-c", "copy",    # Копируем видеопоток без перекодирования
-        "-c:a", "aac",   # Кодек для аудио (AAC)
-        "-f", "segment", # Активация сегментации (разделение на файлы)
-        "-segment_time", str(segment_time),  # Длительность сегмента
-        "-strftime", "1",  # Использование формата времени в названии файла
-        os.path.join(output_folder, "%Y-%m-%d_%H-%M-%S.mp4")  # Шаблон имени файлов
-    ]
+    logging.basicConfig(
+        level=logging.INFO, 
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[
+            logging.FileHandler(log_file),  
+            logging.StreamHandler()
+        ]
+    )
 
-    print("Запуск записи... Нажмите Ctrl+C для остановки.")
+class CameraRecorder(Thread):
+    def __init__(self, name, rtsp_url, output_folder, segment_time):
+        super().__init__()
+        self.name = name
+        self.rtsp_url = rtsp_url
+        self.output_folder = output_folder  
+        self.segment_time = segment_time
+        self.running = False  
+        os.makedirs(self.output_folder, exist_ok=True)
+
+    def run(self):
+        unix_time = int(time.time()) 
+        output_template = os.path.join(
+            self.output_folder,
+            f"{unix_time}+%Y-%m-%d_%H-%M-%S.mp4"
+        )
+
+        # ffmpeg run command
+        ffmpeg_command = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel", "error",      # error logs ffmpeg
+            "-rtsp_transport", "tcp",  # use tcp
+            "-i", self.rtsp_url,       # rtsp type
+            "-c", "copy",              # no encoding
+            "-c:a", "aac",             # audio codec
+            "-f", "segment",           # segmentation
+            "-segment_time", str(self.segment_time),  # segment duration
+            "-strftime", "1",          # Time in filename
+            output_template
+        ]
+
+        logging.info(f"Init record '{self.name}' src: '{self.output_folder}'")
+        self.running = True
+        try:
+            subprocess.run(ffmpeg_command, check=True)
+        except KeyboardInterrupt:
+            logging.warning(f"'{self.name}' stoped")
+        except Exception as e:
+            logging.error(f"Error from '{self.name}': {e}")
+        finally:
+            self.running = False
+            logging.info(f"Record complete for '{self.name}'")
+
+    def stop_recording(self):
+        logging.info(f"Stop record for '{self.name}'")
+        self.running = False
+
+class MultiCameraRecorder:
+    def __init__(self, config_file):
+        self.config_file = config_file
+        self.config = self.load_config()
+        self.segment_time = self.config.get("segment_duration", 60)
+        self.recorders = []
+
+    def load_config(self):
+        with open(self.config_file, "r") as f:
+            config = yaml.safe_load(f)
+        return config
+
+    def start_recording(self):
+
+        logging.info("Start recording")
+
+        for camera in self.config.get("cameras", []):
+            name = camera["name"]
+            rtsp_url = camera["rtsp_url"]
+            output_folder = camera["output_folder"]
+            recorder = CameraRecorder(name, rtsp_url, output_folder, self.segment_time)
+            self.recorders.append(recorder)
+            recorder.start()
+
+    def stop_recording(self):
+        logging.info("Stop recording")
+        for recorder in self.recorders:
+            recorder.stop_recording()
+
+def main():
+    CONFIG_FILE = "config.yml"
+
     try:
-        # Запускаем ffmpeg
-        subprocess.run(ffmpeg_command)
+        with open(CONFIG_FILE, "r") as f:
+            config = yaml.safe_load(f)
+        log_file = config.get("log_file", "record_rtsp.log")
+    except Exception as e:
+        print(f"Error load config.yml: {e}")
+        return
+
+    setup_global_logging(log_file)
+    recorder_manager = MultiCameraRecorder(CONFIG_FILE)
+
+    try:
+        recorder_manager.start_recording()
+        while True:
+            time.sleep(1) 
     except KeyboardInterrupt:
-        print("Запись завершена. Скрипт остановлен.")
+        logging.info("Stop manually.")
+        recorder_manager.stop_recording()
 
 if __name__ == "__main__":
-    # Введите URL RTSP поток вашей камеры
-    RTSP_URL = "rtsp://stream.url/1/1"
-
-    # Папка для сохранения файлов
-    OUTPUT_FOLDER = "./recordings"
-
-    # Длительность сегмента в секундах (1 минута)
-    SEGMENT_DURATION = 60
-
-    # Запускаем функцию
-    record_rtsp(RTSP_URL, OUTPUT_FOLDER, SEGMENT_DURATION)
+    main()
