@@ -50,6 +50,7 @@ class CameraRecorder(Thread):
             "-f", "segment",           # segmentation
             "-segment_time", str(self.segment_time),  # segment duration
             "-strftime", "1",          # Time in filename
+            "-reset_timestamps", "1",  # Reset timestamps for containers
             output_template
         ]
 
