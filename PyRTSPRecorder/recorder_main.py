@@ -51,6 +51,8 @@ class CameraRecorder(Thread):
             "-segment_time", str(self.segment_time),  # segment duration
             "-strftime", "1",          # Time in filename
             "-reset_timestamps", "1",  # Reset timestamps for containers
+            "-metadata", f"description={self.name} {unix_time}",
+            "-metadata", f"creation_time={time}",
             output_template
         ]
 
