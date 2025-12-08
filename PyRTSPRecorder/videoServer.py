@@ -8,13 +8,12 @@ class VideoServer:
         self.html_template = os.path.abspath(html_template)  # Путь к HTML-шаблону
         self.port = port
         self.directory = os.path.abspath(directory)  # Абсолютный путь к директории
-        print (self.directory)
+        print(f"Serving directory: {self.directory}")
+        global dirV
+        dirV = self.directory
 
     def start(self):
-        # Создаем директорию, если ее нет
-        os.makedirs(self.directory, exist_ok=True)
 
-        # Создаем обработчик с переданными параметрами
         handler = partial(self.CustomHandler, self.html_template, self.directory)
 
         # Запускаем HTTP-сервер
@@ -30,15 +29,16 @@ class VideoServer:
         def __init__(self, html_template, directory, *args, **kwargs):
             self.html_template = html_template  # Связываем шаблон с обработчиком
             self.directory = directory  # Связываем директорию с обработчиком
+            print ("custom handler: ", self.directory, "   ", directory)
             super().__init__(*args, **kwargs)
 
         def translate_path(self, path):
             """
-            Переводит URL-путь в путь файловой системы, основываясь на self.directory
+            Переводит URL-путь в путь файловой системы в self.directory
             """
-            # Базовая директория — это self.directory
             relative_path = unquote(path.lstrip("/"))
             absolute_path = os.path.join(self.directory, relative_path)
+            print ("abs path:  ", absolute_path)
             return absolute_path
 
         def do_GET(self):
@@ -51,7 +51,7 @@ class VideoServer:
                 self.end_headers()
                 self.wfile.write(self._render_main_page().encode('utf-8'))
             elif self.path.startswith('/videos/'):  # Видео или файл для скачивания
-                self.send_file(self.path.lstrip('/'))
+                self.send_file(self.path.lstrip('/videos/'))
             else:
                 self.send_error(404, "File Not Found")
 
@@ -60,16 +60,17 @@ class VideoServer:
             Создает HTML-код главной страницы на основе шаблона и содержимого директории
             """
             # Получаем список видеофайлов из директории
+            print (dirV)
             files = [
-                f for f in os.listdir("./recordings/camera2")
-                if os.path.isfile(os.path.join("./recordings/camera2", f))
+                f for f in os.listdir(dirV)
+                if os.path.isfile(os.path.join(dirV, f))
             ]
-            print (files)
 
             video_table_rows = ""
             for file in files:
-                file_url = f"/videos/{self.directory}{file}"
-                download_url = f"/videos/{self.directory}{file}"
+                # Формируем ссылки для воспроизведения и скачивания файлов
+                file_url = f"/videos/{file}"
+                download_url = f"/videos/{file}"
                 video_table_rows += (
                     f"<tr>"
                     f"<td><a href='#' onclick=\"playVideo('{file_url}')\">{file}</a></td>"
@@ -77,18 +78,19 @@ class VideoServer:
                     f"</tr>"
                 )
 
-            # Читаем HTML-шаблон и заполняем его
+            # Читаем HTML-шаблон и заполняем в нем {{VIDEO_TABLE_ROWS}}
             with open(self.html_template, 'r', encoding='utf-8') as f:
                 html_content = f.read()
 
             return html_content.replace("{{VIDEO_TABLE_ROWS}}", video_table_rows)
 
-        def send_file(self, file_path):
+        def send_file(self, file_name):
             """
             Отправляет файл клиенту
             """
             try:
-                abs_path = os.path.join(self.directory, file_path.replace("videos/", ""))
+                # Абсолютный путь к файлу
+                abs_path = os.path.join(self.directory, unquote(file_name))
                 if os.path.exists(abs_path) and os.path.isfile(abs_path):
                     self.send_response(200)
                     self.send_header("Content-Type", "application/octet-stream")
@@ -153,10 +155,10 @@ if __name__ == "__main__":
         with open(html_template_path, "w", encoding="utf-8") as f:
             f.write(html_template_content)
 
-    # Указываем папку с видео
-    directory = "./recordings/camera2"
-    os.makedirs(directory, exist_ok=True)  # Создаем папку, если ее нет
+    # Указываем папку для видео
+    video_directory = "./recordings/camera2"
+    os.makedirs(video_directory, exist_ok=True)  # Создаем директорию, если её нет
 
     # Создаем и запускаем сервер
-    server = VideoServer(html_template=html_template_path, port=9596, directory=directory)
+    server = VideoServer(html_template=html_template_path, port=9596, directory=video_directory)
     server.start()
