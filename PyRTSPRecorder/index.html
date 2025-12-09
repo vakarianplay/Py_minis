@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RECORDER SERVER</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 30px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+        .breadcrumbs {
+            background: white;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            font-size: 14px;
+        }
+        .breadcrumbs a {
+            color: #007BFF;
+            text-decoration: none;
+            margin: 0 5px;
+        }
+        .breadcrumbs a:hover {
+            text-decoration: underline;
+        }
+        .status {
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+            display: none;
+            font-weight: 500;
+        }
+        .status.error {
+            background-color: #ffebee;
+            color: #c62828;
+            border-left: 4px solid #c62828;
+            display: block;
+        }
+        .status.info {
+            background-color: #e3f2fd;
+            color: #1565c0;
+            border-left: 4px solid #1565c0;
+            display: block;
+        }
+        .status.warning {
+            background-color: #fff3e0;
+            color: #ef6c00;
+            border-left: 4px solid #ef6c00;
+            display: block;
+        }
+        .status.success {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            border-left: 4px solid #2e7d32;
+            display: block;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #e0e0e0;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #81C784);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin-top: 20px;
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        th, td { 
+            border: 1px solid #ddd; 
+            padding: 12px; 
+            text-align: left; 
+        }
+        th { 
+            background-color: #4CAF50;
+            color: white;
+            font-weight: bold;
+        }
+        tbody tr:hover {
+            background-color: #f5f5f5;
+        }
+        tbody tr.active {
+            background-color: #e8f5e9;
+        }
+        tbody tr.directory-row {
+            background-color: #f9f9f9;
+        }
+        tbody tr.directory-row:hover {
+            background-color: #e3f2fd;
+        }
+        a { 
+            text-decoration: none; 
+            color: #007BFF; 
+            cursor: pointer;
+        }
+        a:hover { 
+            text-decoration: underline; 
+        }
+        .play-btn {
+            display: inline-block;
+            width: 100%;
+            color: #007BFF;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .play-btn:hover {
+            color: #0056b3;
+        }
+        .folder-icon {
+            font-size: 18px;
+            margin-right: 5px;
+        }
+        .download-link {
+            font-size: 20px;
+            text-decoration: none;
+            transition: transform 0.2s;
+            display: inline-block;
+        }
+        .download-link:hover {
+            text-decoration: none;
+            transform: scale(1.3);
+        }
+        .codec-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        .codec-h265 {
+            background-color: #ff9800;
+            color: white;
+        }
+        .codec-h264 {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .codec-unknown {
+            background-color: #9e9e9e;
+            color: white;
+        }
+
+        /* Стили для плеера под файлом */
+        .video-row {
+            display: none;
+            background-color: #000;
+        }
+        .video-row.show {
+            display: table-row;
+        }
+        .video-row td {
+            padding: 0;
+            border: none;
+        }
+        .video-container {
+            background-color: #000;
+            padding: 20px;
+        }
+        .video-player {
+            width: 100%;
+            max-height: 600px;
+            display: block;
+            border-radius: 4px;
+        }
+        .video-info {
+            padding: 10px 20px;
+            background-color: #333;
+            color: white;
+            font-size: 14px;
+            border-radius: 0 0 4px 4px;
+        }
+        .video-status {
+            padding: 10px 20px;
+            background-color: #1a1a1a;
+            color: #aaa;
+            font-size: 12px;
+            text-align: center;
+        }
+        .close-video {
+            float: right;
+            color: #fff;
+            cursor: pointer;
+            font-size: 20px;
+            font-weight: bold;
+            padding: 0 10px;
+        }
+        .close-video:hover {
+            color: #ff5252;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎬 CAMERA ARCHIVE</h1>
+    <div class="subtitle">Camera view server</div>
+
+    <div class="breadcrumbs">
+        {{BREADCRUMBS}}
+    </div>
+
+    <div id="globalStatus" class="status"></div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th style="width: 100px;">Size</th>
+                <th style="width: 100px;">Codec</th>
+                <th style="width: 80px; text-align: center;">Download</th>
+            </tr>
+        </thead>
+        <tbody id="fileList">
+            {{VIDEO_TABLE_ROWS}}
+        </tbody>
+    </table>
+
+    <script>
+        let currentVideoRow = null;
+        let currentVideoElement = null;
+        let statusCheckInterval = null;
+        let currentFileId = null;
+
+        function showGlobalStatus(message, type, showProgress = false) {
+            const statusDiv = document.getElementById('globalStatus');
+            statusDiv.innerHTML = message;
+            if (showProgress) {
+                statusDiv.innerHTML += '<div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>';
+            }
+            statusDiv.className = 'status ' + type;
+        }
+
+        function hideGlobalStatus() {
+            document.getElementById('globalStatus').style.display = 'none';
+        }
+
+        function createVideoRow(fileRow, fileName, filePath, videoUrl) {
+            // Создаём уникальный ID для видео-строки
+            const videoRowId = 'video-row-' + Date.now();
+
+            // Создаём новую строку для видео
+            const videoRow = document.createElement('tr');
+            videoRow.className = 'video-row';
+            videoRow.id = videoRowId;
+            videoRow.innerHTML = `
+                <td colspan="4">
+                    <div class="video-container">
+                        <div class="video-info">
+                            <span class="close-video" onclick="closeVideo('${videoRowId}')">&times;</span>
+                            <strong>Playing:</strong> ${decodeURIComponent(fileName)}
+                        </div>
+                        <video class="video-player" controls preload="metadata" id="player-${videoRowId}">
+                            Your browser does not support the video tag.
+                        </video>
+                        <div class="video-status" id="status-${videoRowId}">Loading...</div>
+                    </div>
+                </td>
+            `;
+
+            // Вставляем строку после текущей строки файла
+            fileRow.parentNode.insertBefore(videoRow, fileRow.nextSibling);
+
+            return videoRowId;
+        }
+
+        function closeVideo(videoRowId) {
+            const videoRow = document.getElementById(videoRowId);
+            if (videoRow) {
+                const video = videoRow.querySelector('video');
+                if (video) {
+                    video.pause();
+                    video.src = '';
+                }
+                videoRow.remove();
+            }
+
+            // Убираем активный класс со всех строк
+            document.querySelectorAll('tbody tr.active').forEach(row => {
+                row.classList.remove('active');
+            });
+
+            // Останавливаем проверку статуса
+            if (statusCheckInterval) {
+                clearInterval(statusCheckInterval);
+                statusCheckInterval = null;
+            }
+
+            currentVideoRow = null;
+            currentVideoElement = null;
+            currentFileId = null;
+        }
+
+        function checkConversionStatus(videoUrl, fileName, filePath, videoRowId) {
+            if (statusCheckInterval) {
+                clearInterval(statusCheckInterval);
+            }
+
+            const statusDiv = document.getElementById('status-' + videoRowId);
+
+            statusCheckInterval = setInterval(() => {
+                fetch('/status/' + encodeURIComponent(filePath))
+                    .then(response => response.json())
+                    .then(data => {
+                        console.log('Conversion status:', data);
+
+                        if (data.status === 'completed') {
+                            clearInterval(statusCheckInterval);
+                            statusCheckInterval = null;
+                            if (statusDiv) {
+                                statusDiv.textContent = 'Conversion complete! Loading video...';
+                                statusDiv.style.backgroundColor = '#2e7d32';
+                            }
+                            setTimeout(() => {
+                                loadAndPlayVideo(videoUrl, fileName, videoRowId);
+                            }, 1000);
+                        } else if (data.status === 'converting') {
+                            if (statusDiv) {
+                                statusDiv.textContent = `Converting H.265 to H.264: ${data.progress}%`;
+                                statusDiv.style.backgroundColor = '#ef6c00';
+                            }
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Error checking status:', err);
+                    });
+            }, 1000);
+        }
+
+        function loadAndPlayVideo(videoUrl, fileName, videoRowId) {
+            const video = document.getElementById('player-' + videoRowId);
+            const statusDiv = document.getElementById('status-' + videoRowId);
+
+            if (!video) return;
+
+            video.src = videoUrl;
+            if (statusDiv) {
+                statusDiv.textContent = 'Loading video...';
+                statusDiv.style.backgroundColor = '#1565c0';
+            }
+
+            video.load();
+
+            video.play()
+                .then(() => {
+                    console.log('Video playing successfully');
+                    if (statusDiv) {
+                        statusDiv.textContent = 'Playing';
+                        statusDiv.style.backgroundColor = '#2e7d32';
+                    }
+                })
+                .catch(err => {
+                    console.error('Error playing video:', err);
+                    if (statusDiv) {
+                        statusDiv.textContent = 'Error: ' + err.message;
+                        statusDiv.style.backgroundColor = '#c62828';
+                    }
+                });
+
+            // Обработчик ошибок
+            video.addEventListener('error', function(e) {
+                console.error('Video element error:', e);
+                if (video.error && statusDiv) {
+                    let errorMessage = 'Unknown error';
+                    switch(video.error.code) {
+                        case 1: errorMessage = 'Video loading aborted'; break;
+                        case 2: errorMessage = 'Network error'; break;
+                        case 3: errorMessage = 'Video decoding failed'; break;
+                        case 4: errorMessage = 'Video format not supported'; break;
+                    }
+                    statusDiv.textContent = 'Error: ' + errorMessage;
+                    statusDiv.style.backgroundColor = '#c62828';
+                }
+            });
+        }
+
+        function playVideo(videoUrl, fileName, filePath, rowElement) {
+            console.log('Requesting video:', videoUrl);
+
+            // Если уже открыто видео для этого файла, закрываем его
+            const existingVideoRow = rowElement.nextElementSibling;
+            if (existingVideoRow && existingVideoRow.classList.contains('video-row')) {
+                closeVideo(existingVideoRow.id);
+                return;
+            }
+
+            // Закрываем предыдущее видео если оно было
+            if (currentVideoRow) {
+                closeVideo(currentVideoRow);
+            }
+
+            // Добавляем активный класс к строке
+            document.querySelectorAll('tbody tr.active').forEach(row => {
+                row.classList.remove('active');
+            });
+            rowElement.classList.add('active');
+
+            // Создаём новую строку с видео
+            const videoRowId = createVideoRow(rowElement, fileName, filePath, videoUrl);
+            currentVideoRow = videoRowId;
+            currentFileId = filePath;
+
+            // Показываем строку с анимацией
+            setTimeout(() => {
+                document.getElementById(videoRowId).classList.add('show');
+            }, 10);
+
+            // Делаем запрос к видео
+            fetch(videoUrl)
+                .then(response => {
+                    if (response.status === 202) {
+                        // Видео конвертируется
+                        return response.json().then(data => {
+                            const statusDiv = document.getElementById('status-' + videoRowId);
+                            if (statusDiv) {
+                                statusDiv.textContent = 'Starting conversion from H.265 to H.264...';
+                                statusDiv.style.backgroundColor = '#ef6c00';
+                            }
+                            checkConversionStatus(videoUrl, fileName, filePath, videoRowId);
+                        });
+                    } else if (response.ok) {
+                        // Видео готово
+                        loadAndPlayVideo(videoUrl, fileName, videoRowId);
+                    } else {
+                        throw new Error('Failed to load video');
+                    }
+                })
+                .catch(err => {
+                    console.error('Error:', err);
+                    const statusDiv = document.getElementById('status-' + videoRowId);
+                    if (statusDiv) {
+                        statusDiv.textContent = 'Error: ' + err.message;
+                        statusDiv.style.backgroundColor = '#c62828';
+                    }
+                });
+        }
+
+        // Очистка при закрытии страницы
+        window.addEventListener('beforeunload', () => {
+            if (statusCheckInterval) {
+                clearInterval(statusCheckInterval);
+            }
+        });
+    </script>
+</body>
+</html>
