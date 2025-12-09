@@ -6,27 +6,24 @@ from functools import partial
 from urllib.parse import unquote, quote
 import mimetypes
 import hashlib
+import base64
 
 class VideoServer:
-    def __init__(self, html_template, port, directory, cache_dir):
+    def __init__(self, html_template, port, directory, username=None, password_hash=None):
         self.html_template = os.path.abspath(html_template)
         self.port = port
         self.directory = os.path.abspath(directory)
-        self.cache_dir = os.path.abspath(cache_dir)
+        self.cache_dir = os.path.join(directory, '.cache')
+        self.username = username
+        self.password_hash = password_hash
         os.makedirs(self.cache_dir, exist_ok=True)
-        print(f"Serving directory: {self.directory}")
-        print(f"Cache directory: {self.cache_dir}")
+        # print(f"Serving directory: {self.directory}")
+        # print(f"Cache directory: {self.cache_dir}")
 
-        # Проверяем наличие FFmpeg
         if not self.check_ffmpeg():
             print("\n⚠️  WARNING: FFmpeg not found!")
-            print("Install FFmpeg for H.265 support:")
-            print("  Ubuntu/Debian: sudo apt install ffmpeg")
-            print("  MacOS: brew install ffmpeg")
-            print("  Windows: download from https://ffmpeg.org/download.html\n")
 
     def check_ffmpeg(self):
-        """Проверяет наличие FFmpeg"""
         try:
             subprocess.run(['ffmpeg', '-version'], 
                           stdout=subprocess.PIPE, 
@@ -38,9 +35,16 @@ class VideoServer:
             return False
 
     def start(self):
-        handler = partial(self.CustomHandler, self.html_template, self.directory, self.cache_dir)
+        handler = partial(
+            self.CustomHandler, 
+            self.html_template, 
+            self.directory, 
+            self.cache_dir,
+            self.username,
+            self.password_hash
+        )
         server = HTTPServer(('', self.port), handler)
-        print(f"Starting server on port {self.port}. Visit http://localhost:{self.port}")
+        # print(f"Starting server on port {self.port}. Visit http://localhost:{self.port}")
         try:
             server.serve_forever()
         except KeyboardInterrupt:
@@ -48,17 +52,58 @@ class VideoServer:
             server.server_close()
 
     class CustomHandler(BaseHTTPRequestHandler):
-        conversion_status = {}  # Глобальный статус конвертации
+        conversion_status = {}
         conversion_lock = threading.Lock()
 
-        def __init__(self, html_template, directory, cache_dir, *args, **kwargs):
+        def __init__(self, html_template, directory, cache_dir, username, password_hash, *args, **kwargs):
             self.html_template = html_template
             self.base_directory = directory
             self.cache_dir = cache_dir
+            self.auth_username = username
+            self.auth_password_hash = password_hash
             super().__init__(*args, **kwargs)
 
+        def check_authentication(self):
+            if not self.auth_username or not self.auth_password_hash:
+                return True
+
+            # Get header Authorization
+            auth_header = self.headers.get('Authorization')
+
+            if auth_header is None:
+                return False
+
+            # Basic Auth parsing
+            try:
+                auth_type, auth_string = auth_header.split(' ', 1)
+                if auth_type.lower() != 'basic':
+                    return False
+
+                # decode base64
+                decoded = base64.b64decode(auth_string).decode('utf-8')
+                username, password = decoded.split(':', 1)
+                password_hash = hashlib.sha256(password.encode()).hexdigest()
+
+                if username == self.auth_username and password_hash == self.auth_password_hash:
+                    return True
+                
+            except Exception as e:
+                return False
+            return False
+
+        # Request auth
+        def require_authentication(self):
+            self.send_response(401)
+            self.send_header('WWW-Authenticate', 'Basic realm="RTSP ARCHIVE"')
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(b'<html><body><h1>401 Unauthorized</h1><p>Access denied. Please provide valid credentials.</p></body></html>')
+
         def do_HEAD(self):
-            """Обрабатывает HEAD-запросы (для проверки статуса)"""
+            if not self.check_authentication():
+                self.require_authentication()
+                return
+
             if self.path.startswith('/videos/'):
                 file_path = unquote(self.path[8:].split('?')[0])
                 self.check_video_status(file_path)
@@ -66,9 +111,11 @@ class VideoServer:
                 self.send_error(404, "Not Found")
 
         def do_GET(self):
-            """Обрабатывает GET-запросы"""
+            if not self.check_authentication():
+                self.require_authentication()
+                return
+
             if self.path == '/' or self.path.startswith('/?dir='):
-                # Получаем текущую директорию из параметра
                 current_dir = ''
                 if '?dir=' in self.path:
                     current_dir = unquote(self.path.split('?dir=')[1])
@@ -90,24 +137,19 @@ class VideoServer:
                 self.send_error(404, "File Not Found")
 
         def get_all_video_files(self, start_dir=''):
-            """Рекурсивно получает все видеофайлы из директории"""
             full_path = os.path.join(self.base_directory, start_dir) if start_dir else self.base_directory
-
             items = []
             video_extensions = {'.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg'}
 
             try:
                 entries = sorted(os.listdir(full_path))
-
                 for entry in entries:
                     if entry.startswith('.'):
                         continue
-
                     entry_full_path = os.path.join(full_path, entry)
                     entry_rel_path = os.path.join(start_dir, entry) if start_dir else entry
 
                     if os.path.isdir(entry_full_path):
-                        # Это директория
                         items.append({
                             'type': 'directory',
                             'name': entry,
@@ -115,7 +157,6 @@ class VideoServer:
                             'full_path': entry_full_path
                         })
                     elif os.path.isfile(entry_full_path):
-                        # Проверяем расширение файла
                         ext = os.path.splitext(entry)[1].lower()
                         if ext in video_extensions:
                             items.append({
@@ -128,19 +169,13 @@ class VideoServer:
 
             except Exception as e:
                 print(f"Error listing directory {full_path}: {e}")
-
             return items
 
         def _render_main_page(self, current_dir=''):
-            """Создает HTML главной страницы"""
             items = self.get_all_video_files(current_dir)
-
-            # Формируем breadcrumbs (хлебные крошки)
             breadcrumbs = self._generate_breadcrumbs(current_dir)
-
             video_table_rows = ""
 
-            # Добавляем кнопку "Назад" если не в корневой директории
             if current_dir:
                 parent_dir = os.path.dirname(current_dir)
                 parent_url = f"/?dir={quote(parent_dir)}" if parent_dir else "/"
@@ -151,7 +186,7 @@ class VideoServer:
                     f"</tr>"
                 )
 
-            # Сначала показываем директории
+            # Build file tree
             for item in items:
                 if item['type'] == 'directory':
                     dir_url = f"/?dir={quote(item['path'])}"
@@ -162,18 +197,15 @@ class VideoServer:
                         f"</tr>"
                     )
 
-            # Затем показываем файлы
             for item in items:
                 if item['type'] == 'file':
                     file_url = f"/videos/{quote(item['path'])}"
                     download_url = f"/videos/{quote(item['path'])}?download=1"
-
                     size_mb = item['size'] / (1024 * 1024)
 
-                    # Определяем кодек
+                    # Detect codec
                     codec = self.get_video_codec(item['full_path'])
                     codec_badge = f'<span class="codec-badge codec-{codec.lower().replace(".", "")}">{codec}</span>'
-
                     video_table_rows += (
                         f"<tr id='row-{quote(item['path'])}' onclick=\"playVideo('{file_url}', '{item['name']}', '{item['path']}', this)\" style='cursor: pointer;'>"
                         f"<td><span class='play-btn'>▶ {item['name']}</span></td>"
@@ -190,29 +222,24 @@ class VideoServer:
                 print(f"Error reading template: {e}")
                 return f"<html><body><h1>Error loading template</h1><p>{e}</p></body></html>"
 
-            # Заменяем плейсхолдеры
             html_content = html_content.replace("{{BREADCRUMBS}}", breadcrumbs)
             html_content = html_content.replace("{{VIDEO_TABLE_ROWS}}", video_table_rows)
 
             return html_content
 
         def _generate_breadcrumbs(self, current_dir):
-            """Генерирует хлебные крошки навигации"""
             if not current_dir:
                 return '<a href="/">🏠 Home</a>'
-
             parts = current_dir.split(os.sep)
             breadcrumbs = '<a href="/">🏠 Home</a>'
-
             path_accumulator = ''
             for part in parts:
                 path_accumulator = os.path.join(path_accumulator, part) if path_accumulator else part
                 breadcrumbs += f' / <a href="/?dir={quote(path_accumulator)}">{part}</a>'
-
             return breadcrumbs
 
         def get_video_codec(self, file_path):
-            """Определяет видео кодек"""
+
             try:
                 result = subprocess.run([
                     'ffprobe', '-v', 'error',
@@ -235,7 +262,6 @@ class VideoServer:
                 return 'Unknown'
 
         def needs_conversion(self, file_path):
-            """Проверяет нужна ли конвертация"""
             try:
                 result = subprocess.run([
                     'ffprobe', '-v', 'error',
@@ -251,7 +277,6 @@ class VideoServer:
                 return False
 
         def get_cache_path(self, original_path):
-            """Получает путь к кэшированному файлу"""
             file_hash = hashlib.md5(original_path.encode()).hexdigest()[:8]
             file_stat = os.stat(original_path)
             time_hash = hashlib.md5(str(file_stat.st_mtime).encode()).hexdigest()[:8]
@@ -259,91 +284,73 @@ class VideoServer:
             return os.path.join(self.cache_dir, f"{base_name}_{file_hash}_{time_hash}_h264.mp4")
 
         def check_video_status(self, file_path):
-            """Проверяет статус видео для HEAD запроса"""
             try:
                 original_path = os.path.join(self.base_directory, file_path)
-
                 if not os.path.exists(original_path):
                     self.send_error(404, "File not found")
                     return
-
-                # Проверяем нужна ли конвертация
                 if self.needs_conversion(original_path):
                     cache_path = self.get_cache_path(original_path)
-
-                    # Проверяем кэш
+                    
+                    # If file already in cache
                     if os.path.exists(cache_path):
-                        # Файл уже сконвертирован
                         self.send_response(200)
                         self.send_header("Content-Type", "video/mp4")
                         self.send_header("Content-Length", str(os.path.getsize(cache_path)))
                         self.end_headers()
                     else:
-                        # Проверяем статус конвертации
+                        # Encoding status
                         with self.conversion_lock:
                             status = self.conversion_status.get(file_path, {})
 
                             if status.get('converting'):
-                                # Конвертация уже идёт
-                                self.send_response(202)  # Accepted
+                                # Send message of encoding
+                                self.send_response(202)
                                 self.send_header("Content-Type", "application/json")
                                 self.end_headers()
                             else:
-                                # Нужно начать конвертацию
                                 self.conversion_status[file_path] = {
                                     'converting': True,
                                     'progress': 0
                                 }
 
-                                # Запускаем конвертацию в фоне
+                                # Start ffmpeg thread
                                 threading.Thread(
                                     target=self.convert_video,
                                     args=(original_path, cache_path, file_path),
                                     daemon=True
                                 ).start()
 
-                                self.send_response(202)  # Accepted
+                                self.send_response(202)  
                                 self.send_header("Content-Type", "application/json")
                                 self.end_headers()
                 else:
-                    # Конвертация не нужна
                     self.send_response(200)
                     self.send_header("Content-Type", "video/mp4")
                     self.send_header("Content-Length", str(os.path.getsize(original_path)))
                     self.end_headers()
 
             except Exception as e:
-                print(f"Error checking video status: {e}")
                 self.send_error(500, "Internal Server Error")
 
         def send_video_file(self, file_path):
-            """Отправляет видеофайл (с конвертацией если нужно)"""
             try:
                 original_path = os.path.join(self.base_directory, file_path)
-                print(f"Attempting to serve: {original_path}")
 
                 if not os.path.exists(original_path):
-                    print(f"File not found: {original_path}")
                     self.send_error(404, "File not found")
                     return
 
-                # Проверяем нужна ли конвертация
                 if self.needs_conversion(original_path):
-                    print(f"H.265 video detected: {file_path}")
                     cache_path = self.get_cache_path(original_path)
 
-                    # Проверяем кэш
                     if os.path.exists(cache_path):
-                        print(f"Serving cached H.264 version")
                         video_file_path = cache_path
                     else:
-                        # Проверяем статус конвертации
                         with self.conversion_lock:
                             status = self.conversion_status.get(file_path, {})
 
                             if status.get('converting'):
-                                # Конвертация уже идёт
-                                print(f"Conversion in progress: {status.get('progress', 0)}%")
                                 self.send_json_response(202, {
                                     'status': 'converting',
                                     'progress': status.get('progress', 0),
@@ -351,14 +358,11 @@ class VideoServer:
                                 })
                                 return
                             else:
-                                # Начинаем конвертацию
-                                print(f"Starting conversion to H.264")
                                 self.conversion_status[file_path] = {
                                     'converting': True,
                                     'progress': 0
                                 }
 
-                        # Запускаем конвертацию в фоне
                         threading.Thread(
                             target=self.convert_video,
                             args=(original_path, cache_path, file_path),
@@ -374,7 +378,7 @@ class VideoServer:
                 else:
                     video_file_path = original_path
 
-                # Отправляем файл
+                # Send file
                 file_size = os.path.getsize(video_file_path)
                 mime_type = 'video/mp4'
                 range_header = self.headers.get('Range')
@@ -397,11 +401,7 @@ class VideoServer:
                 traceback.print_exc()
 
         def convert_video(self, input_path, output_path, file_path):
-            """Конвертирует видео из H.265 в H.264"""
             try:
-                print(f"Converting: {file_path}")
-
-                # Получаем длительность для отслеживания прогресса
                 duration_cmd = [
                     'ffprobe', '-v', 'error',
                     '-show_entries', 'format=duration',
@@ -414,16 +414,16 @@ class VideoServer:
                 except:
                     total_duration = 0
 
-                # FFmpeg команда
+                # FFmpeg command
                 cmd = [
                     'ffmpeg', '-i', input_path,
-                    '-c:v', 'libx264',          # H.264 кодек
-                    '-preset', 'fast',          # Быстрая конвертация
-                    '-crf', '23',               # Качество
-                    '-c:a', 'aac',              # AAC аудио
-                    '-b:a', '128k',             # Битрейт аудио
-                    '-movflags', '+faststart',  # Оптимизация для веб
-                    '-y',                       # Перезаписать
+                    '-c:v', 'libx264',          # H.264 codec
+                    '-preset', 'fast',          # Fast encoding profile
+                    '-crf', '23',               # Quality
+                    '-c:a', 'aac',              # AAC codec
+                    '-b:a', '128k',             # Audio bitrate
+                    '-movflags', '+faststart',  # Encoding profile optimize
+                    '-y',                       # Re-write file
                     output_path
                 ]
 
@@ -446,16 +446,12 @@ class VideoServer:
                             with self.conversion_lock:
                                 if file_path in self.conversion_status:
                                     self.conversion_status[file_path]['progress'] = progress
-
-                            if progress % 10 == 0:  # Логируем каждые 10%
-                                print(f"Conversion progress: {progress}%")
                         except:
                             pass
 
                 process.wait()
 
                 if process.returncode == 0:
-                    print(f"✓ Conversion completed: {file_path}")
                     with self.conversion_lock:
                         self.conversion_status[file_path] = {
                             'converting': False,
@@ -479,10 +475,8 @@ class VideoServer:
                         del self.conversion_status[file_path]
 
         def send_conversion_status(self, file_path):
-            """Отправляет статус конвертации"""
             with self.conversion_lock:
                 status = self.conversion_status.get(file_path, {})
-
             if status.get('completed'):
                 self.send_json_response(200, {
                     'status': 'completed',
@@ -500,7 +494,6 @@ class VideoServer:
                 })
 
         def send_json_response(self, code, data):
-            """Отправляет JSON ответ"""
             import json
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
@@ -508,7 +501,6 @@ class VideoServer:
             self.wfile.write(json.dumps(data).encode())
 
         def handle_range_request(self, file_path, file_size, mime_type, range_header):
-            """Обрабатывает Range запросы"""
             try:
                 ranges = range_header.strip().lower().replace('bytes=', '').split('-')
                 start = int(ranges[0]) if ranges[0] else 0
@@ -544,8 +536,8 @@ class VideoServer:
             except Exception as e:
                 print(f"Error handling range request: {e}")
 
+        # Download original file
         def send_download_file(self, file_path):
-            """Отправляет оригинальный файл для скачивания"""
             try:
                 full_path = os.path.join(self.base_directory, file_path)
 
@@ -568,27 +560,19 @@ class VideoServer:
                 print(f"Error sending download: {e}")
 
         def copyfile(self, source, outputfile):
-            """Копирует файл по частям"""
             while True:
                 buf = source.read(8192)
                 if not buf:
                     break
                 outputfile.write(buf)
 
-        def log_message(self, format, *args):
-            """Логирование запросов"""
-            print(f"{self.address_string()} - {format % args}")
-
-
 if __name__ == "__main__":
-    html_template_path = "./index.html"
-    # if not os.path.exists(html_template_path):
-    #     with open(html_template_path, "w", encoding="utf-8") as f:
-    #         f.write(html_template_content)
+    html_template_path = "index.html"
+    video_directory = "./recordings"
+    password_hash = "86790b005b9b7bef99f759204287538f6bdc86889b5362b6ab28c4cc171842cf"
 
-    video_dir = "./recordings"
-    cache_dir = "./.cache"
-    os.makedirs(video_dir, exist_ok=True)
 
-    server = VideoServer(html_template=html_template_path, port=9596, directory=video_dir, cache_dir=cache_dir)
+    server = VideoServer(html_template=html_template_path, port=9596, directory=video_directory, username="admin", password_hash=password_hash)
+
+
     server.start()
