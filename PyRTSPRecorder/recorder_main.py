@@ -91,7 +91,8 @@ class MultiCameraRecorder:
         for camera in self.config.get("cameras", []):
             name = camera["name"]
             rtsp_url = camera["rtsp_url"]
-            output_folder = camera["output_folder"]
+            # output_folder = camera["output_folder"]
+            output_folder = self.config.get("output_folder", "cam") + "/" + name
             recorder = CameraRecorder(name, rtsp_url, output_folder, self.segment_time)
             self.recorders.append(recorder)
             recorder.start()
