@@ -7,21 +7,22 @@ from urllib.parse import unquote, quote
 import mimetypes
 import hashlib
 import base64
+import logging
 
 class VideoServer:
     def __init__(self, html_template, port, directory, username=None, password_hash=None):
         self.html_template = os.path.abspath(html_template)
         self.port = port
         self.directory = os.path.abspath(directory)
-        self.cache_dir = os.path.join(directory, '.cache')
+        self.cache_dir = os.path.join('.cache_recorder')
         self.username = username
         self.password_hash = password_hash
         os.makedirs(self.cache_dir, exist_ok=True)
-        # print(f"Serving directory: {self.directory}")
-        # print(f"Cache directory: {self.cache_dir}")
+        logging.info(f"Serving directory: {self.directory}")
+        logging.info(f"Cache directory: {self.cache_dir}")
 
         if not self.check_ffmpeg():
-            print("\n⚠️  WARNING: FFmpeg not found!")
+            logging.warning("FFmpeg not found!")
 
     def check_ffmpeg(self):
         try:
@@ -29,7 +30,7 @@ class VideoServer:
                           stdout=subprocess.PIPE, 
                           stderr=subprocess.PIPE, 
                           check=True)
-            print("✓ FFmpeg found")
+            logging.info("FFmpeg found")
             return True
         except (subprocess.CalledProcessError, FileNotFoundError):
             return False
@@ -44,11 +45,11 @@ class VideoServer:
             self.password_hash
         )
         server = HTTPServer(('', self.port), handler)
-        # print(f"Starting server on port {self.port}. Visit http://localhost:{self.port}")
+        logging.info(f"Starting server on port {self.port}. http://localhost:{self.port}")
         try:
             server.serve_forever()
         except KeyboardInterrupt:
-            print("\nServer stopped")
+            logging.info("\nServer stopped")
             server.server_close()
 
     class CustomHandler(BaseHTTPRequestHandler):
@@ -168,7 +169,7 @@ class VideoServer:
                             })
 
             except Exception as e:
-                print(f"Error listing directory {full_path}: {e}")
+                logging.info(f"Error listing directory {full_path}: {e}")
             return items
 
         def _render_main_page(self, current_dir=''):
@@ -219,7 +220,7 @@ class VideoServer:
                 with open(self.html_template, 'r', encoding='utf-8') as f:
                     html_content = f.read()
             except Exception as e:
-                print(f"Error reading template: {e}")
+                logging.info(f"Error reading template: {e}")
                 return f"<html><body><h1>Error loading template</h1><p>{e}</p></body></html>"
 
             html_content = html_content.replace("{{BREADCRUMBS}}", breadcrumbs)
@@ -396,7 +397,7 @@ class VideoServer:
                         self.copyfile(f, self.wfile)
 
             except Exception as e:
-                print(f"Error sending video: {e}")
+                logging.info(f"Error sending video: {e}")
                 import traceback
                 traceback.print_exc()
 
@@ -459,7 +460,7 @@ class VideoServer:
                             'completed': True
                         }
                 else:
-                    print(f"✗ Conversion failed: {file_path}")
+                    logging.info(f"✗ Conversion failed: {file_path}")
                     if os.path.exists(output_path):
                         os.remove(output_path)
                     with self.conversion_lock:
@@ -467,7 +468,7 @@ class VideoServer:
                             del self.conversion_status[file_path]
 
             except Exception as e:
-                print(f"Error during conversion: {e}")
+                logging.info(f"Error during conversion: {e}")
                 import traceback
                 traceback.print_exc()
                 with self.conversion_lock:
@@ -534,7 +535,7 @@ class VideoServer:
                         remaining -= len(data)
 
             except Exception as e:
-                print(f"Error handling range request: {e}")
+                logging.info(f"Error handling range request: {e}")
 
         # Download original file
         def send_download_file(self, file_path):
@@ -557,7 +558,7 @@ class VideoServer:
                     self.copyfile(f, self.wfile)
 
             except Exception as e:
-                print(f"Error sending download: {e}")
+                logging.info(f"Error sending download: {e}")
 
         def copyfile(self, source, outputfile):
             while True:
