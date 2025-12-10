@@ -4,6 +4,7 @@ import yaml
 import logging
 import subprocess
 from threading import Thread, current_thread
+from videoServer import VideoServer
 
 def setup_global_logging(log_file):
     log_dir = os.path.dirname(log_file)
@@ -99,9 +100,41 @@ class MultiCameraRecorder:
         for recorder in self.recorders:
             recorder.stop_recording()
 
+class WebServer(Thread):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+
+    def run(self):
+        
+
+        server_port = self.config.get("webserver", {}).get("port", 8080)
+        print(self.config.get("web_server").get("enabled"))
+        
+        if eval(str(self.config.get("web_server").get("enabled"))):
+            port = self.config.get("web_server").get("port")
+            user = self.config.get("web_server").get("user")
+            pass_hash = self.config.get("web_server").get("password_hash")
+            page_path = self.config.get("web_server").get("html_page")
+            dir_path = self.config.get("output_folder")
+            
+            server = VideoServer(html_template=page_path, port=int(port), directory=dir_path, username=user, password_hash=pass_hash)
+            
+            logging.info(f"Webserver thread ID: {current_thread().ident}. Port: {port}  User: {user}, Page: {page_path}")
+            
+            server.start()
+        else:
+            logging.warning("Webserver disabled")
+
+
+        while True:
+            time.sleep(1)
+            
+            
+
 def main():
     CONFIG_FILE = "config.yml"
-
+    
     try:
         with open(CONFIG_FILE, "r") as f:
             config = yaml.safe_load(f)
@@ -116,6 +149,9 @@ def main():
 
     try:
         recorder_manager.start_recording()
+        webserver = WebServer(config)
+        webserver.start()
+
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
