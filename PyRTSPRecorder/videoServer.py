@@ -435,7 +435,7 @@ class VideoServer:
                     universal_newlines=True
                 )
 
-                # Отслеживаем прогресс
+                # Watching progress
                 for line in process.stderr:
                     if 'time=' in line and total_duration > 0:
                         try:
@@ -568,12 +568,6 @@ class VideoServer:
                 outputfile.write(buf)
 
 if __name__ == "__main__":
-    html_template_path = "index.html"
-    video_directory = "./recordings"
-    password_hash = "86790b005b9b7bef99f759204287538f6bdc86889b5362b6ab28c4cc171842cf"
-
-
-    server = VideoServer(html_template=html_template_path, port=9596, directory=video_directory, username="admin", password_hash=password_hash)
-
-
-    server.start()
+    print("It's server class")
+    print("Create object VideoServer(html_template=html_template_path, port=9596, directory=video_directory, username=user, password_hash=password_hash)")
+    print("run by .start() function")
