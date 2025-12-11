@@ -12,11 +12,27 @@
 - `pip install yaml`
 - `pip install threading`
 - `apt install ffmpeg`
+  
+----------------
 
+🌀 **Default Webserver credentials**
 
+Username: `admin`. Pass: `demopassword`. http://localhost:9596
+
+Username and password you can change in `config.yml`. For pass used sha256 hash
+
+-----------------
+
+🎯 **Usage**
+
+```bash
+python3 recorder_main.py
+```
+
+------------------------
 
 🔧 **Configuration**
-Edit the config.yml file:
+Edit the `config.yml` file:
 
 ```yaml  
 segment_duration: 30
@@ -33,6 +49,12 @@ web_server:
   enabled: true
   port: 8080
   user: admin
-  password_hash: 86790b005b9b7bef99f759204287538f6bdc86889b5362b6ab28c4cc171842cf #sha256 hash from passphrase
+  password_hash: 5487cf596c53bf12e05cec7d9e2b719478cba212eb9e146e927900b48825f872 #sha256 hash from passphrase. Default pass: demopassword
   html_page: index.html
 ```
+
+---------------------
+
+
+<img width="1905" height="844" alt="image" src="https://github.com/user-attachments/assets/d9ee508c-9df6-4557-b605-cdc90c353cd3" /> <img width="1896" height="912" alt="image" src="https://github.com/user-attachments/assets/3c8b74d4-c8ce-4a23-a6ef-6f55d0424c3f" />
+
