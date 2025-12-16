@@ -29,6 +29,13 @@ Username and password you can change in `config.yml`. For pass used sha256 hash
 python3 recorder_main.py
 ```
 
+alternative method with watchdog
+
+```bash
+chmod +x recorder_run.sh
+./recorder_run.sh
+```
+
 ------------------------
 
 🔧 **Configuration**
