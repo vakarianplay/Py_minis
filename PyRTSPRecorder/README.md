@@ -39,6 +39,7 @@ chmod +x recorder_run.sh
 ------------------------
 
 🔧 **Configuration**
+
 Edit the `config.yml` file:
 
 ```yaml  
@@ -60,6 +61,32 @@ web_server:
   html_page: index.html
 ```
 
+
+---------------------
+
+**⚙️ Systemd daeamon**
+
+Create systemd daemon for run recorder as service
+
+- Create systemd daemon `sudo nano /etc/systemd/system/recorder.service`
+```ini
+[Unit]
+Description=RTSP Recorder
+After=default.target
+
+[Service]
+User=your_user
+Restart=on-abort
+WorkingDirectory=/path/to/PyRTSPRecorder/
+ExecStart=/path/to/PyRTSPRecorder/./recorder_run.sh
+
+[Install]
+WantedBy=default.target
+```
+
+- Reload systemd `systemctl daemon-reload`
+- Run service `service recorder start` or `sudo systemctl start recorder.service`
+  
 ---------------------
 
 
