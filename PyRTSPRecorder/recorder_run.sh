@@ -1,7 +1,5 @@
 #!/bin/bash
 
-#!/bin/bash
-
 CONFIG_FILE="config.yml"
 PID_FILE="recorder.pid"
 
