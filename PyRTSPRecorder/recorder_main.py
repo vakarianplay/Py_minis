@@ -117,8 +117,11 @@ class WebServer(Thread):
             pass_hash = self.config.get("web_server").get("password_hash")
             page_path = self.config.get("web_server").get("html_page")
             dir_path = self.config.get("output_folder")
+            index_db = self.config.get("DB").get("index_db")
+            index_scan = self.config.get("DB").get("index_scan_interval_sec")           
             
-            server = VideoServer(html_template=page_path, port=int(port), directory=dir_path, username=user, password_hash=pass_hash)
+            server = VideoServer(html_template=page_path, port=int(port), directory=dir_path, username=user, password_hash=pass_hash, 
+                                 index_db_path=index_db, index_scan_interval=index_scan)
             
             logging.info(f"Webserver thread ID: {current_thread().ident}. Port: {port}  User: {user}, Page: {page_path}")
             
