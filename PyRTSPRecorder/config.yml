@@ -8,12 +8,19 @@ cameras:
     rtsp_url: rtsp://camera.example/stream2 
   - name: Camera3
     rtsp_url: rtsp://camera.example/stream3
+    
 web_server:
   enabled: true
   port: 8080
   user: admin
   password_hash: 5487cf596c53bf12e05cec7d9e2b719478cba212eb9e146e927900b48825f872 #sha256 hash from passphrase. Default pass: demopassword
   html_page: index.html
+  
 DB:
   index_db: ./video_index.db
   index_scan_interval_sec: 30
+  
+live_server:
+  enabled: true
+  html_page: live.html
+
