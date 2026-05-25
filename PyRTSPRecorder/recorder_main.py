@@ -4,6 +4,7 @@ import yaml
 import logging
 import subprocess
 from threading import Thread, current_thread
+import live_stream
 from videoServer import VideoServer
 
 def setup_global_logging(log_file):
@@ -118,10 +119,20 @@ class WebServer(Thread):
             page_path = self.config.get("web_server").get("html_page")
             dir_path = self.config.get("output_folder")
             index_db = self.config.get("DB").get("index_db")
-            index_scan = self.config.get("DB").get("index_scan_interval_sec")           
+            index_scan = self.config.get("DB").get("index_scan_interval_sec")
+            
+            live_stream_flag = bool(self.config.get("live_server").get("enabled"))
+            live_template = self.config.get("live_server").get("html_page") if live_stream_flag else None
+            
+            cameras_map = {}
+            for cam in self.config.get("cameras", []):
+                name = cam.get("name")
+                rtsp = cam.get("rtsp_url")
+                if name and rtsp:
+                    cameras_map[name] = rtsp
             
             server = VideoServer(html_template=page_path, port=int(port), directory=dir_path, username=user, password_hash=pass_hash, 
-                                 index_db_path=index_db, index_scan_interval=index_scan)
+                                 index_db_path=index_db, index_scan_interval=index_scan, live_template=live_template, cameras=cameras_map)
             
             logging.info(f"Webserver thread ID: {current_thread().ident}. Port: {port}  User: {user}, Page: {page_path}")
             

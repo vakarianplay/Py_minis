@@ -7,10 +7,11 @@ import subprocess
 import threading
 
 from functools import partial
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import quote, unquote
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import quote, unquote, urlparse, parse_qs
 
 from indexDb import VideoIndexDB
+from live_stream import LiveStreamRouter
 
 class VideoServer:
     def __init__(
@@ -21,7 +22,9 @@ class VideoServer:
         username=None,
         password_hash=None,
         index_db_path=None,
-        index_scan_interval=30
+        index_scan_interval=30,
+        live_template=None,
+        cameras=None
     ):
         self.html_template = os.path.abspath(html_template)
         self.port = int(port)
@@ -41,9 +44,18 @@ class VideoServer:
             scan_interval=index_scan_interval
         )
 
+        self.live_router = None
+        if live_template:
+            self.live_router = LiveStreamRouter(
+                html_template=live_template,
+                cameras=cameras or {}
+            )
+
         logging.info("Serving directory: %s", self.directory)
         logging.info("Cache directory: %s", self.cache_dir)
         logging.info("Index DB: %s", os.path.abspath(index_db_path))
+        if self.live_router:
+            logging.info("Live mode enabled on same server port")
 
         if not self.check_ffmpeg():
             logging.warning("FFmpeg not found!")
@@ -71,10 +83,11 @@ class VideoServer:
             self.cache_dir,
             self.username,
             self.password_hash,
-            self.index_db
+            self.index_db,
+            self.live_router
         )
 
-        server = HTTPServer(("", self.port), handler)
+        server = ThreadingHTTPServer(("", self.port), handler)
         logging.info(
             "Starting server on port %s. http://localhost:%s",
             self.port,
@@ -102,6 +115,7 @@ class VideoServer:
             username,
             password_hash,
             index_db,
+            live_router,
             *args,
             **kwargs
         ):
@@ -111,6 +125,7 @@ class VideoServer:
             self.auth_username = username
             self.auth_password_hash = password_hash
             self.index_db = index_db
+            self.live_router = live_router
             super().__init__(*args, **kwargs)
 
         def check_authentication(self):
@@ -156,8 +171,9 @@ class VideoServer:
                 self.require_authentication()
                 return
 
-            if self.path.startswith("/videos/"):
-                rel_path = unquote(self.path[8:].split("?")[0])
+            parsed = urlparse(self.path)
+            if parsed.path.startswith("/videos/"):
+                rel_path = unquote(parsed.path[len("/videos/"):])
                 self.check_video_status(rel_path)
             else:
                 self.send_error(404, "Not Found")
@@ -167,10 +183,18 @@ class VideoServer:
                 self.require_authentication()
                 return
 
-            if self.path == "/" or self.path.startswith("/?dir="):
+            parsed = urlparse(self.path)
+            path = parsed.path
+            query = parse_qs(parsed.query)
+
+            if self.live_router and path.startswith("/live"):
+                if self.live_router.handle_get(self):
+                    return
+
+            if path == "/":
                 current_dir = ""
-                if "?dir=" in self.path:
-                    current_dir = unquote(self.path.split("?dir=", 1)[1])
+                if "dir" in query and query["dir"]:
+                    current_dir = unquote(query["dir"][0])
 
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -180,16 +204,16 @@ class VideoServer:
                 )
                 return
 
-            if self.path.startswith("/videos/"):
-                rel_path = unquote(self.path[8:].split("?")[0])
-                if "?download=1" in self.path:
+            if path.startswith("/videos/"):
+                rel_path = unquote(path[len("/videos/"):])
+                if "download" in query and query["download"] and query["download"][0] == "1":
                     self.send_download_file(rel_path)
                 else:
                     self.send_video_file(rel_path)
                 return
 
-            if self.path.startswith("/status/"):
-                rel_path = unquote(self.path[8:])
+            if path.startswith("/status/"):
+                rel_path = unquote(path[len("/status/"):])
                 self.send_conversion_status(rel_path)
                 return
 
@@ -197,8 +221,7 @@ class VideoServer:
 
         def _norm_rel(self, rel_path):
             rel_path = rel_path.replace("\\", "/")
-            rel_path = rel_path.strip("/")
-            return rel_path
+            return rel_path.strip("/")
 
         def _resolve_video_path(self, rel_path):
             rel_path = self._norm_rel(rel_path)
@@ -209,7 +232,6 @@ class VideoServer:
                 if full_path and os.path.exists(full_path):
                     return rel_path, full_path, meta
 
-            # Fallback, если файл еще не попал в индекс
             full_path = os.path.abspath(
                 os.path.join(self.base_directory, rel_path)
             )
@@ -548,9 +570,7 @@ class VideoServer:
                         try:
                             time_str = line.split("time=")[1].split()[0]
                             h, m, s = time_str.split(":")
-                            current = (
-                                int(h) * 3600 + int(m) * 60 + float(s)
-                            )
+                            current = int(h) * 3600 + int(m) * 60 + float(s)
                             progress = min(
                                 int((current / total_duration) * 100),
                                 99
@@ -611,7 +631,9 @@ class VideoServer:
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+            self.wfile.write(
+                json.dumps(data, ensure_ascii=False).encode("utf-8")
+            )
 
         def handle_range_request(
             self,
@@ -626,6 +648,7 @@ class VideoServer:
                     .replace("bytes=", "")
                     .split("-")
                 )
+
                 start = int(ranges[0]) if ranges[0] else 0
                 end = int(ranges[1]) if len(ranges) > 1 and ranges[1] else (
                     file_size - 1
