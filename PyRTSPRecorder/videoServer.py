@@ -34,6 +34,7 @@ class VideoServer:
         self.password_hash = password_hash
 
         os.makedirs(self.cache_dir, exist_ok=True)
+        os.makedirs(self.directory, exist_ok=True)
 
         if not index_db_path:
             index_db_path = os.path.join(self.cache_dir, "video_index.db")
@@ -54,8 +55,6 @@ class VideoServer:
         logging.info("Serving directory: %s", self.directory)
         logging.info("Cache directory: %s", self.cache_dir)
         logging.info("Index DB: %s", os.path.abspath(index_db_path))
-        if self.live_router:
-            logging.info("Live mode enabled on same server port")
 
         if not self.check_ffmpeg():
             logging.warning("FFmpeg not found!")
@@ -175,8 +174,9 @@ class VideoServer:
             if parsed.path.startswith("/videos/"):
                 rel_path = unquote(parsed.path[len("/videos/"):])
                 self.check_video_status(rel_path)
-            else:
-                self.send_error(404, "Not Found")
+                return
+
+            self.send_error(404, "Not Found")
 
         def do_GET(self):
             if not self.check_authentication():
@@ -206,7 +206,11 @@ class VideoServer:
 
             if path.startswith("/videos/"):
                 rel_path = unquote(path[len("/videos/"):])
-                if "download" in query and query["download"] and query["download"][0] == "1":
+                if (
+                    "download" in query
+                    and query["download"]
+                    and query["download"][0] == "1"
+                ):
                     self.send_download_file(rel_path)
                 else:
                     self.send_video_file(rel_path)
@@ -219,9 +223,36 @@ class VideoServer:
 
             self.send_error(404, "File Not Found")
 
+        def do_POST(self):
+            if not self.check_authentication():
+                self.require_authentication()
+                return
+
+            parsed = urlparse(self.path)
+
+            if parsed.path == "/api/delete_video":
+                self.handle_delete_video_api()
+                return
+
+            if parsed.path == "/api/clear_directory":
+                self.handle_clear_directory_api()
+                return
+
+            self.send_error(404, "Not Found")
+
         def _norm_rel(self, rel_path):
-            rel_path = rel_path.replace("\\", "/")
+            rel_path = str(rel_path).replace("\\", "/")
             return rel_path.strip("/")
+
+        def _read_json_body(self):
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if length <= 0:
+                    return {}
+                raw = self.rfile.read(length)
+                return json.loads(raw.decode("utf-8"))
+            except Exception:
+                return {}
 
         def _resolve_video_path(self, rel_path):
             rel_path = self._norm_rel(rel_path)
@@ -243,6 +274,27 @@ class VideoServer:
 
             return rel_path, full_path, None
 
+        def _resolve_directory_path(self, rel_dir):
+            rel_dir = self._norm_rel(rel_dir)
+            full_dir = os.path.abspath(os.path.join(self.base_directory, rel_dir))
+
+            if not full_dir.startswith(self.base_directory):
+                return rel_dir, None
+
+            if not os.path.isdir(full_dir):
+                return rel_dir, None
+
+            return rel_dir, full_dir
+
+        def _rescan_index_async(self):
+            def _rescan():
+                try:
+                    self.index_db.scan_once()
+                except Exception as e:
+                    logging.error("Index rescan failed: %s", e)
+
+            threading.Thread(target=_rescan, daemon=True).start()
+
         def get_all_video_files(self, start_dir=""):
             try:
                 return self.index_db.list_items(start_dir)
@@ -255,6 +307,22 @@ class VideoServer:
             items = self.get_all_video_files(current_dir)
             breadcrumbs = self._generate_breadcrumbs(current_dir)
 
+            if current_dir:
+                clear_btn = (
+                    "<button class='toolbar-btn danger' "
+                    f"onclick=\"clearDirectory('{quote(current_dir)}')\">"
+                    "🧹 Очистить текущую папку</button>"
+                )
+            else:
+                clear_btn = (
+                    "<button class='toolbar-btn danger' disabled "
+                    "title='Откройте папку для очистки'>"
+                    "🧹 Очистить текущую папку</button>"
+                )
+
+            toolbar = f"<div class='toolbar'>{clear_btn}</div>"
+            breadcrumbs = f"{breadcrumbs}{toolbar}"
+
             video_table_rows = ""
 
             if current_dir:
@@ -266,7 +334,7 @@ class VideoServer:
                     "style='cursor: pointer;'>"
                     "<td><span class='folder-icon'>📁</span> "
                     "<strong>..</strong> (Parent Directory)</td>"
-                    "<td colspan='3'></td>"
+                    "<td colspan='4'></td>"
                     "</tr>"
                 )
 
@@ -279,42 +347,52 @@ class VideoServer:
                         "style='cursor: pointer;'>"
                         "<td><span class='folder-icon'>📁</span> "
                         f"<strong>{item['name']}</strong></td>"
-                        "<td colspan='3'><em>Folder</em></td>"
+                        "<td colspan='4'><em>Folder</em></td>"
                         "</tr>"
                     )
 
             for item in items:
-                if item["type"] == "file":
-                    file_url = f"/videos/{quote(item['path'])}"
-                    download_url = f"/videos/{quote(item['path'])}?download=1"
-                    size_mb = item["size"] / (1024 * 1024)
-                    codec = item.get("codec", "Unknown")
-                    css_codec = codec.lower().replace(".", "")
+                if item["type"] != "file":
+                    continue
 
-                    codec_badge = (
-                        f"<span class='codec-badge codec-{css_codec}'>"
-                        f"{codec}</span>"
-                    )
+                file_url = f"/videos/{quote(item['path'])}"
+                download_url = f"/videos/{quote(item['path'])}?download=1"
+                size_mb = item["size"] / (1024 * 1024)
+                codec = item.get("codec", "Unknown")
+                css_codec = codec.lower().replace(".", "")
 
-                    video_table_rows += (
-                        f"<tr id='row-{quote(item['path'])}' "
-                        "onclick=\"playVideo("
-                        f"'{file_url}', '{item['name']}', "
-                        f"'{item['path']}', this)\" "
-                        "style='cursor: pointer;'>"
-                        f"<td><span class='play-btn'>▶ {item['name']}</span></td>"
-                        f"<td>{size_mb:.1f} MB</td>"
-                        f"<td>{codec_badge}</td>"
-                        "<td style='text-align: center;' "
-                        "onclick='event.stopPropagation();'>"
-                        f"<a href='{download_url}' class='download-link'>"
-                        "&#128190;</a></td>"
-                        "</tr>"
-                    )
+                codec_badge = (
+                    f"<span class='codec-badge codec-{css_codec}'>"
+                    f"{codec}</span>"
+                )
+
+                delete_btn = (
+                    "<button class='delete-btn' "
+                    "title='Удалить видео' "
+                    "onclick=\"event.stopPropagation();"
+                    f"deleteVideo('{quote(item['path'])}')\">🗑</button>"
+                )
+
+                video_table_rows += (
+                    f"<tr id='row-{quote(item['path'])}' "
+                    "onclick=\"playVideo("
+                    f"'{file_url}', '{item['name']}', "
+                    f"'{item['path']}', this)\" "
+                    "style='cursor: pointer;'>"
+                    f"<td><span class='play-btn'>▶ {item['name']}</span></td>"
+                    f"<td>{size_mb:.1f} MB</td>"
+                    f"<td>{codec_badge}</td>"
+                    "<td style='text-align: center;' "
+                    "onclick='event.stopPropagation();'>"
+                    f"<a href='{download_url}' class='download-link'>"
+                    "&#128190;</a></td>"
+                    f"<td style='text-align: center;'>{delete_btn}</td>"
+                    "</tr>"
+                )
 
             if not items and not self.index_db.ready:
                 video_table_rows += (
-                    "<tr><td colspan='4'>"
+                    "<tr><td colspan='5'>"
                     "<em>Индексация архива... обновите страницу через "
                     "несколько секунд.</em>"
                     "</td></tr>"
@@ -330,14 +408,9 @@ class VideoServer:
                     f"<p>{e}</p></body></html>"
                 )
 
-            html_content = html_content.replace(
-                "{{BREADCRUMBS}}",
-                breadcrumbs
-            )
-            html_content = html_content.replace(
-                "{{VIDEO_TABLE_ROWS}}",
-                video_table_rows
-            )
+            html_content = html_content.replace("{{BREADCRUMBS}}", breadcrumbs)
+            html_content = html_content.replace("{{VIDEO_TABLE_ROWS}}", video_table_rows)
+
             return html_content
 
         def _generate_breadcrumbs(self, current_dir):
@@ -350,9 +423,7 @@ class VideoServer:
 
             for part in parts:
                 path_acc = f"{path_acc}/{part}" if path_acc else part
-                breadcrumbs += (
-                    f' / <a href="/?dir={quote(path_acc)}">{part}</a>'
-                )
+                breadcrumbs += f' / <a href="/?dir={quote(path_acc)}">{part}</a>'
             return breadcrumbs
 
         def needs_conversion(self, file_path, rel_path=None):
@@ -383,9 +454,7 @@ class VideoServer:
         def get_cache_path(self, original_path):
             file_hash = hashlib.md5(original_path.encode()).hexdigest()[:8]
             file_stat = os.stat(original_path)
-            time_hash = hashlib.md5(
-                str(file_stat.st_mtime).encode()
-            ).hexdigest()[:8]
+            time_hash = hashlib.md5(str(file_stat.st_mtime).encode()).hexdigest()[:8]
             base_name = os.path.splitext(os.path.basename(original_path))[0]
             cache_name = f"{base_name}_{file_hash}_{time_hash}_h264.mp4"
             return os.path.join(self.cache_dir, cache_name)
@@ -412,13 +481,9 @@ class VideoServer:
 
                     with self.conversion_lock:
                         status = self.conversion_status.get(rel_path, {})
-
                         if status.get("converting"):
                             self.send_response(202)
-                            self.send_header(
-                                "Content-Type",
-                                "application/json"
-                            )
+                            self.send_header("Content-Type", "application/json")
                             self.end_headers()
                             return
 
@@ -571,16 +636,11 @@ class VideoServer:
                             time_str = line.split("time=")[1].split()[0]
                             h, m, s = time_str.split(":")
                             current = int(h) * 3600 + int(m) * 60 + float(s)
-                            progress = min(
-                                int((current / total_duration) * 100),
-                                99
-                            )
+                            progress = min(int((current / total_duration) * 100), 99)
 
                             with self.conversion_lock:
                                 if rel_path in self.conversion_status:
-                                    self.conversion_status[rel_path][
-                                        "progress"
-                                    ] = progress
+                                    self.conversion_status[rel_path]["progress"] = progress
                         except Exception:
                             pass
 
@@ -612,7 +672,8 @@ class VideoServer:
 
             if status.get("completed"):
                 self.send_json_response(
-                    200, {"status": "completed", "progress": 100}
+                    200,
+                    {"status": "completed", "progress": 100}
                 )
             elif status.get("converting"):
                 self.send_json_response(
@@ -623,25 +684,102 @@ class VideoServer:
                     }
                 )
             else:
+                self.send_json_response(200, {"status": "ready", "progress": 0})
+
+        def handle_delete_video_api(self):
+            body = self._read_json_body()
+            rel_path = self._norm_rel(body.get("path", ""))
+
+            if not rel_path:
+                self.send_json_response(400, {"ok": False, "error": "path is empty"})
+                return
+
+            rel_path, full_path, _ = self._resolve_video_path(rel_path)
+            if not full_path:
+                self.send_json_response(404, {"ok": False, "error": "file not found"})
+                return
+
+            try:
+                cache_path = self.get_cache_path(full_path)
+
+                if os.path.exists(full_path):
+                    os.remove(full_path)
+
+                if os.path.exists(cache_path):
+                    try:
+                        os.remove(cache_path)
+                    except Exception:
+                        pass
+
+                with self.conversion_lock:
+                    self.conversion_status.pop(rel_path, None)
+
+                self._rescan_index_async()
+                self.send_json_response(200, {"ok": True})
+            except Exception as e:
+                logging.error("Delete video error: %s", e)
+                self.send_json_response(500, {"ok": False, "error": "delete failed"})
+
+        def handle_clear_directory_api(self):
+            body = self._read_json_body()
+            rel_dir = self._norm_rel(body.get("dir", ""))
+
+            if not rel_dir:
                 self.send_json_response(
-                    200, {"status": "ready", "progress": 0}
+                    400,
+                    {"ok": False, "error": "dir is empty (root clear disabled)"}
                 )
+                return
+
+            rel_dir, full_dir = self._resolve_directory_path(rel_dir)
+            if not full_dir:
+                self.send_json_response(404, {"ok": False, "error": "directory not found"})
+                return
+
+            try:
+                deleted_files = 0
+                deleted_dirs = 0
+
+                for root, dirs, files in os.walk(full_dir, topdown=False):
+                    for name in files:
+                        fp = os.path.join(root, name)
+                        try:
+                            os.remove(fp)
+                            deleted_files += 1
+                        except Exception:
+                            pass
+
+                    for name in dirs:
+                        dp = os.path.join(root, name)
+                        try:
+                            os.rmdir(dp)
+                            deleted_dirs += 1
+                        except Exception:
+                            pass
+
+                with self.conversion_lock:
+                    self.conversion_status.clear()
+
+                self._rescan_index_async()
+                self.send_json_response(
+                    200,
+                    {
+                        "ok": True,
+                        "deleted_files": deleted_files,
+                        "deleted_dirs": deleted_dirs
+                    }
+                )
+            except Exception as e:
+                logging.error("Clear directory error: %s", e)
+                self.send_json_response(500, {"ok": False, "error": "clear failed"})
 
         def send_json_response(self, code, data):
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(
-                json.dumps(data, ensure_ascii=False).encode("utf-8")
-            )
+            self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
 
-        def handle_range_request(
-            self,
-            file_path,
-            file_size,
-            mime_type,
-            range_header
-        ):
+        def handle_range_request(self, file_path, file_size, mime_type, range_header):
             try:
                 ranges = (
                     range_header.strip().lower()
@@ -650,9 +788,7 @@ class VideoServer:
                 )
 
                 start = int(ranges[0]) if ranges[0] else 0
-                end = int(ranges[1]) if len(ranges) > 1 and ranges[1] else (
-                    file_size - 1
-                )
+                end = int(ranges[1]) if len(ranges) > 1 and ranges[1] else file_size - 1
 
                 if start >= file_size or start < 0:
                     self.send_error(416, "Requested Range Not Satisfiable")
@@ -665,10 +801,7 @@ class VideoServer:
 
                 self.send_response(206)
                 self.send_header("Content-Type", mime_type)
-                self.send_header(
-                    "Content-Range",
-                    f"bytes {start}-{end}/{file_size}"
-                )
+                self.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
                 self.send_header("Content-Length", str(content_length))
                 self.send_header("Accept-Ranges", "bytes")
                 self.end_headers()
@@ -676,7 +809,6 @@ class VideoServer:
                 with open(file_path, "rb") as f:
                     f.seek(start)
                     remaining = content_length
-
                     while remaining > 0:
                         chunk_size = min(8192, remaining)
                         data = f.read(chunk_size)
@@ -698,10 +830,7 @@ class VideoServer:
                 file_size = os.path.getsize(full_path)
 
                 self.send_response(200)
-                self.send_header(
-                    "Content-Type",
-                    "application/octet-stream"
-                )
+                self.send_header("Content-Type", "application/octet-stream")
                 self.send_header(
                     "Content-Disposition",
                     f'attachment; filename="{os.path.basename(full_path)}"'
