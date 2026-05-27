@@ -1,451 +1,408 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="utf-8">
+    <meta
+        name="viewport"
+        content="width=device-width,initial-scale=1"
+    >
     <title>RTSP ARCHIVE</title>
     <style>
-        body { 
-            font-family: Arial, sans-serif; 
-            margin: 30px;
-            background-color: #f5f5f5;
-        }
-        h1 {
-            color: #333;
-            margin-bottom: 10px;
-        }
-        .subtitle {
-            color: #666;
-            margin-bottom: 20px;
-            font-size: 14px;
-        }
-        .breadcrumbs {
-            background: white;
-            padding: 15px;
-            margin-bottom: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            font-size: 14px;
-        }
-        .breadcrumbs a {
-            color: #007BFF;
-            text-decoration: none;
-            margin: 0 5px;
-        }
-        .breadcrumbs a:hover {
-            text-decoration: underline;
-        }
-        .status {
-            padding: 15px;
-            margin-bottom: 15px;
-            border-radius: 4px;
-            display: none;
-            font-weight: 500;
-        }
-        .status.error {
-            background-color: #ffebee;
-            color: #c62828;
-            border-left: 4px solid #c62828;
-            display: block;
-        }
-        .status.info {
-            background-color: #e3f2fd;
-            color: #1565c0;
-            border-left: 4px solid #1565c0;
-            display: block;
-        }
-        .status.warning {
-            background-color: #fff3e0;
-            color: #ef6c00;
-            border-left: 4px solid #ef6c00;
-            display: block;
-        }
-        .status.success {
-            background-color: #e8f5e9;
-            color: #2e7d32;
-            border-left: 4px solid #2e7d32;
-            display: block;
-        }
-        .progress-bar {
-            width: 100%;
-            height: 6px;
-            background: #e0e0e0;
-            border-radius: 3px;
-            overflow: hidden;
-            margin-top: 10px;
-        }
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #4CAF50, #81C784);
-            width: 0%;
-            transition: width 0.3s ease;
-        }
-        table { 
-            width: 100%; 
-            border-collapse: collapse; 
-            margin-top: 20px;
-            background-color: white;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            border-radius: 8px;
-            overflow: hidden;
-        }
-        th, td { 
-            border: 1px solid #ddd; 
-            padding: 12px; 
-            text-align: left; 
-        }
-        th { 
-            background-color: #4CAF50;
-            color: white;
-            font-weight: bold;
-        }
-        tbody tr:hover {
-            background-color: #f5f5f5;
-        }
-        tbody tr.active {
-            background-color: #e8f5e9;
-        }
-        tbody tr.directory-row {
-            background-color: #f9f9f9;
-        }
-        tbody tr.directory-row:hover {
-            background-color: #e3f2fd;
-        }
-        a { 
-            text-decoration: none; 
-            color: #007BFF; 
-            cursor: pointer;
-        }
-        a:hover { 
-            text-decoration: underline; 
-        }
-        .play-btn {
-            display: inline-block;
-            width: 100%;
-            color: #007BFF;
-            cursor: pointer;
-            font-weight: 500;
-        }
-        .play-btn:hover {
-            color: #0056b3;
-        }
-        .folder-icon {
-            font-size: 18px;
-            margin-right: 5px;
-        }
-        .download-link {
-            font-size: 20px;
-            text-decoration: none;
-            transition: transform 0.2s;
-            display: inline-block;
-        }
-        .download-link:hover {
-            text-decoration: none;
-            transform: scale(1.3);
-        }
-        .codec-badge {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            font-weight: bold;
-            text-transform: uppercase;
-        }
-        .codec-h265 {
-            background-color: #ff9800;
-            color: white;
-        }
-        .codec-h264 {
-            background-color: #4CAF50;
-            color: white;
-        }
-        .codec-unknown {
-            background-color: #9e9e9e;
-            color: white;
+        :root {
+            --bg: #0f1115;
+            --panel: #171b22;
+            --line: #2a3242;
+            --text: #e9edf6;
+            --muted: #9aa8c2;
+            --accent: #58a6ff;
+            --danger: #ff6b6b;
         }
 
-        .video-row {
-            display: none;
-            background-color: #000;
+        * {
+            box-sizing: border-box;
         }
-        .video-row.show {
-            display: table-row;
+
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font-family: Arial, sans-serif;
         }
-        .video-row td {
-            padding: 0;
-            border: none;
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 16px;
         }
-        .video-container {
-            background-color: #000;
-            padding: 20px;
+
+        .title {
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 6px;
         }
-        .video-player {
-            width: 100%;
-            max-height: 600px;
-            display: block;
-            border-radius: 4px;
+
+        .subtitle {
+            color: var(--muted);
+            margin-bottom: 12px;
         }
-        .video-info {
-            padding: 10px 20px;
-            background-color: #333;
-            color: white;
-            font-size: 14px;
-            border-radius: 0 0 4px 4px;
+
+        .breadcrumbs {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
         }
-        .video-status {
-            padding: 10px 20px;
-            background-color: #1a1a1a;
-            color: #aaa;
-            font-size: 12px;
-            text-align: center;
+
+        .breadcrumbs a {
+            color: #93c5fd;
+            text-decoration: none;
         }
-        .close-video {
-            float: right;
-            color: #fff;
+
+        .toolbar {
+            display: flex;
+            gap: 8px;
+        }
+
+        .toolbar-btn {
+            border: 1px solid var(--line);
+            background: #1f2735;
+            color: var(--text);
+            padding: 8px 10px;
+            border-radius: 8px;
             cursor: pointer;
-            font-size: 20px;
-            font-weight: bold;
-            padding: 0 10px;
+            text-decoration: none;
+            font-size: 14px;
         }
-        .close-video:hover {
-            color: #ff5252;
+
+        .toolbar-btn:hover {
+            border-color: var(--accent);
+        }
+
+        .toolbar-btn.danger {
+            background: #2b1b1b;
+            border-color: #5a2e2e;
+            color: #ffc0c0;
+        }
+
+        .toolbar-btn.danger:hover {
+            border-color: var(--danger);
+        }
+
+        .toolbar-btn[disabled] {
+            opacity: .45;
+            cursor: not-allowed;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        th, td {
+            padding: 10px;
+            border-bottom: 1px solid var(--line);
+            font-size: 14px;
+        }
+
+        th {
+            text-align: left;
+            color: var(--muted);
+            background: #141923;
+        }
+
+        tr:hover {
+            background: #1b2230;
+        }
+
+        .download-link {
+            color: #c8d4ea;
+            text-decoration: none;
+            font-size: 16px;
+        }
+
+        .delete-btn {
+            border: none;
+            background: transparent;
+            color: #ff9b9b;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .codec-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            background: #121826;
+        }
+
+        .inline-player-row td {
+            padding: 0;
+            background: #0f141d;
+        }
+
+        .inline-player-wrap {
+            border-top: 1px solid #2a3242;
+            padding: 10px;
+        }
+
+        .inline-player-title {
+            color: #9aa8c2;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .inline-player-video {
+            width: 100%;
+            max-height: 56vh;
+            background: #000;
+            border-radius: 8px;
+        }
+
+        .inline-player-hidden {
+            display: none;
         }
     </style>
 </head>
 <body>
-    <h1>🎬 RTSP Recorder Archive</h1>
-    <div class="subtitle">Web view player for CCTV archive</div>
+    <div class="container">
+        <div class="title">🎬 RTSP Recorder Archive</div>
+        <div class="subtitle">Web view player for CCTV archive</div>
+        <div class="subtitle"><a class='toolbar-btn' href='/live'>🔴 Live</a></div>
+        <div class="breadcrumbs">{{BREADCRUMBS}}</div>
 
-    <div class="breadcrumbs">
-        {{BREADCRUMBS}}
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Size</th>
+                    <th>Codec</th>
+                    <th>Download</th>
+                    <th>Delete</th>
+                </tr>
+            </thead>
+            <tbody>{{VIDEO_TABLE_ROWS}}</tbody>
+        </table>
     </div>
 
-    <div id="globalStatus" class="status"></div>
-
-    <table>
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th style="width: 100px;">Size</th>
-                <th style="width: 100px;">Codec</th>
-                <th style="width: 80px; text-align: center;">Download</th>
-            </tr>
-        </thead>
-        <tbody id="fileList">
-            {{VIDEO_TABLE_ROWS}}
-        </tbody>
-    </table>
-
     <script>
-        let currentVideoRow = null;
-        let currentVideoElement = null;
-        let statusCheckInterval = null;
-        let currentFileId = null;
+        let selectedRow = null;
+        let inlineRow = null;
+        let inlineTitle = null;
+        let inlinePlayer = null;
+        let inlineForPath = null;
+        let convTimer = null;
 
-        function showGlobalStatus(message, type, showProgress = false) {
-            const statusDiv = document.getElementById('globalStatus');
-            statusDiv.innerHTML = message;
-            if (showProgress) {
-                statusDiv.innerHTML += '<div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>';
-            }
-            statusDiv.className = 'status ' + type;
-        }
-
-        function hideGlobalStatus() {
-            document.getElementById('globalStatus').style.display = 'none';
-        }
-
-        function createVideoRow(fileRow, fileName, filePath, videoUrl) {
-            const videoRowId = 'video-row-' + Date.now();
-
-            const videoRow = document.createElement('tr');
-            videoRow.className = 'video-row';
-            videoRow.id = videoRowId;
-            videoRow.innerHTML = `
-                <td colspan="4">
-                    <div class="video-container">
-                        <div class="video-info">
-                            <span class="close-video" onclick="closeVideo('${videoRowId}')">&times;</span>
-                            <strong>Playing:</strong> ${decodeURIComponent(fileName)}
-                        </div>
-                        <video class="video-player" controls preload="metadata" id="player-${videoRowId}">
-                            Your browser does not support the video tag.
-                        </video>
-                        <div class="video-status" id="status-${videoRowId}">Loading...</div>
-                    </div>
-                </td>
-            `;
-
-            fileRow.parentNode.insertBefore(videoRow, fileRow.nextSibling);
-
-            return videoRowId;
-        }
-
-        function closeVideo(videoRowId) {
-            const videoRow = document.getElementById(videoRowId);
-            if (videoRow) {
-                const video = videoRow.querySelector('video');
-                if (video) {
-                    video.pause();
-                    video.src = '';
-                }
-                videoRow.remove();
-            }
-
-            document.querySelectorAll('tbody tr.active').forEach(row => {
-                row.classList.remove('active');
-            });
-
-            if (statusCheckInterval) {
-                clearInterval(statusCheckInterval);
-                statusCheckInterval = null;
-            }
-
-            currentVideoRow = null;
-            currentVideoElement = null;
-            currentFileId = null;
-        }
-
-        function checkConversionStatus(videoUrl, fileName, filePath, videoRowId) {
-            if (statusCheckInterval) {
-                clearInterval(statusCheckInterval);
-            }
-
-            const statusDiv = document.getElementById('status-' + videoRowId);
-
-            statusCheckInterval = setInterval(() => {
-                fetch('/status/' + encodeURIComponent(filePath))
-                    .then(response => response.json())
-                    .then(data => {
-                        console.log('Conversion status:', data);
-
-                        if (data.status === 'completed') {
-                            clearInterval(statusCheckInterval);
-                            statusCheckInterval = null;
-                            if (statusDiv) {
-                                statusDiv.textContent = 'Conversion complete! Loading video...';
-                                statusDiv.style.backgroundColor = '#2e7d32';
-                            }
-                            setTimeout(() => {
-                                loadAndPlayVideo(videoUrl, fileName, videoRowId);
-                            }, 1000);
-                        } else if (data.status === 'converting') {
-                            if (statusDiv) {
-                                statusDiv.textContent = `Converting H.265 to H.264: ${data.progress}%`;
-                                statusDiv.style.backgroundColor = '#ef6c00';
-                            }
-                        }
-                    })
-                    .catch(err => {
-                        console.error('Error checking status:', err);
-                    });
-            }, 1000);
-        }
-
-        function loadAndPlayVideo(videoUrl, fileName, videoRowId) {
-            const video = document.getElementById('player-' + videoRowId);
-            const statusDiv = document.getElementById('status-' + videoRowId);
-
-            if (!video) return;
-
-            video.src = videoUrl;
-            if (statusDiv) {
-                statusDiv.textContent = 'Loading video...';
-                statusDiv.style.backgroundColor = '#1565c0';
-            }
-
-            video.load();
-
-            video.play()
-                .then(() => {
-                    console.log('Video playing successfully');
-                    if (statusDiv) {
-                        statusDiv.textContent = 'Playing';
-                        statusDiv.style.backgroundColor = '#2e7d32';
-                    }
-                })
-                .catch(err => {
-                    console.error('Error playing video:', err);
-                    if (statusDiv) {
-                        statusDiv.textContent = 'Error: ' + err.message;
-                        statusDiv.style.backgroundColor = '#c62828';
-                    }
-                });
-
-            video.addEventListener('error', function(e) {
-                console.error('Video element error:', e);
-                if (video.error && statusDiv) {
-                    let errorMessage = 'Unknown error';
-                    switch(video.error.code) {
-                        case 1: errorMessage = 'Video loading aborted'; break;
-                        case 2: errorMessage = 'Network error'; break;
-                        case 3: errorMessage = 'Video decoding failed'; break;
-                        case 4: errorMessage = 'Video format not supported'; break;
-                    }
-                    statusDiv.textContent = 'Error: ' + errorMessage;
-                    statusDiv.style.backgroundColor = '#c62828';
-                }
-            });
-        }
-
-        function playVideo(videoUrl, fileName, filePath, rowElement) {
-            console.log('Requesting video:', videoUrl);
-
-            const existingVideoRow = rowElement.nextElementSibling;
-            if (existingVideoRow && existingVideoRow.classList.contains('video-row')) {
-                closeVideo(existingVideoRow.id);
+        function ensureInlinePlayerRow() {
+            if (inlineRow) {
                 return;
             }
 
-            if (currentVideoRow) {
-                closeVideo(currentVideoRow);
-            }
+            inlineRow = document.createElement("tr");
+            inlineRow.className = "inline-player-row inline-player-hidden";
 
-            document.querySelectorAll('tbody tr.active').forEach(row => {
-                row.classList.remove('active');
-            });
-            rowElement.classList.add('active');
+            const td = document.createElement("td");
+            const thCount = document.querySelectorAll("table thead th").length || 5;
+            td.colSpan = thCount;
 
-            const videoRowId = createVideoRow(rowElement, fileName, filePath, videoUrl);
-            currentVideoRow = videoRowId;
-            currentFileId = filePath;
+            const wrap = document.createElement("div");
+            wrap.className = "inline-player-wrap";
 
-            setTimeout(() => {
-                document.getElementById(videoRowId).classList.add('show');
-            }, 10);
+            inlineTitle = document.createElement("div");
+            inlineTitle.className = "inline-player-title";
+            inlineTitle.textContent = "Загрузка...";
 
-            fetch(videoUrl)
-                .then(response => {
-                    if (response.status === 202) {
-                        return response.json().then(data => {
-                            const statusDiv = document.getElementById('status-' + videoRowId);
-                            if (statusDiv) {
-                                statusDiv.textContent = 'Starting conversion from H.265 to H.264...';
-                                statusDiv.style.backgroundColor = '#ef6c00';
-                            }
-                            checkConversionStatus(videoUrl, fileName, filePath, videoRowId);
-                        });
-                    } else if (response.ok) {
-                        loadAndPlayVideo(videoUrl, fileName, videoRowId);
-                    } else {
-                        throw new Error('Failed to load video');
-                    }
-                })
-                .catch(err => {
-                    console.error('Error:', err);
-                    const statusDiv = document.getElementById('status-' + videoRowId);
-                    if (statusDiv) {
-                        statusDiv.textContent = 'Error: ' + err.message;
-                        statusDiv.style.backgroundColor = '#c62828';
-                    }
-                });
+            inlinePlayer = document.createElement("video");
+            inlinePlayer.className = "inline-player-video";
+            inlinePlayer.controls = true;
+            inlinePlayer.playsInline = true;
+
+            wrap.appendChild(inlineTitle);
+            wrap.appendChild(inlinePlayer);
+            td.appendChild(wrap);
+            inlineRow.appendChild(td);
         }
 
-        window.addEventListener('beforeunload', () => {
-            if (statusCheckInterval) {
-                clearInterval(statusCheckInterval);
+        function moveInlineRowAfter(targetRow) {
+            const tbody = targetRow.parentNode;
+            if (inlineRow.parentNode) {
+                inlineRow.parentNode.removeChild(inlineRow);
             }
-        });
+
+            if (targetRow.nextSibling) {
+                tbody.insertBefore(inlineRow, targetRow.nextSibling);
+            } else {
+                tbody.appendChild(inlineRow);
+            }
+
+            inlineRow.classList.remove("inline-player-hidden");
+        }
+
+        function stopConversionTimer() {
+            if (convTimer) {
+                clearInterval(convTimer);
+                convTimer = null;
+            }
+        }
+
+        function closeInlinePlayer() {
+            stopConversionTimer();
+
+            if (inlinePlayer) {
+                inlinePlayer.pause();
+                inlinePlayer.removeAttribute("src");
+                inlinePlayer.load();
+            }
+
+            if (inlineRow) {
+                inlineRow.classList.add("inline-player-hidden");
+            }
+
+            if (selectedRow) {
+                selectedRow.style.outline = "";
+            }
+
+            selectedRow = null;
+            inlineForPath = null;
+        }
+
+        async function waitConversion(path, url) {
+            stopConversionTimer();
+            inlineTitle.textContent = "Конвертация...";
+
+            convTimer = setInterval(async () => {
+                try {
+                    const r = await fetch(
+                        "/status/" + encodeURIComponent(path)
+                    );
+                    const data = await r.json();
+
+                    if (data.status === "completed" || data.status === "ready") {
+                        stopConversionTimer();
+                        inlineTitle.textContent = "▶ Готово";
+                        inlinePlayer.src = url;
+                        inlinePlayer.play().catch(() => {});
+                        return;
+                    }
+
+                    if (data.status === "converting") {
+                        inlineTitle.textContent =
+                            "Конвертация... " + data.progress + "%";
+                    }
+                } catch (_) {
+                    stopConversionTimer();
+                    inlineTitle.textContent = "Ошибка конвертации";
+                }
+            }, 1500);
+        }
+
+        async function playVideo(url, name, path, row) {
+            ensureInlinePlayerRow();
+
+            if (
+                inlineForPath === path &&
+                !inlineRow.classList.contains("inline-player-hidden")
+            ) {
+                closeInlinePlayer();
+                return;
+            }
+
+            stopConversionTimer();
+
+            if (selectedRow) {
+                selectedRow.style.outline = "";
+            }
+            selectedRow = row;
+            selectedRow.style.outline = "1px solid #58a6ff";
+
+            inlineForPath = path;
+            inlineTitle.textContent = "▶ " + name;
+            moveInlineRowAfter(row);
+
+            try {
+                const r = await fetch(url, { method: "HEAD" });
+
+                if (r.status === 200) {
+                    inlinePlayer.src = url;
+                    inlinePlayer.play().catch(() => {});
+                    return;
+                }
+
+                if (r.status === 202) {
+                    await waitConversion(path, url);
+                    return;
+                }
+
+                inlineTitle.textContent = "Видео недоступно";
+            } catch (_) {
+                inlineTitle.textContent = "Ошибка открытия видео";
+            }
+        }
+
+        async function deleteVideo(encodedPath) {
+            const path = decodeURIComponent(encodedPath);
+
+            if (!confirm("Удалить видео?\n" + path)) {
+                return;
+            }
+
+            try {
+                const r = await fetch("/api/delete_video", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ path: path })
+                });
+
+                const data = await r.json();
+
+                if (!r.ok || !data.ok) {
+                    alert("Ошибка удаления: " + (data.error || r.status));
+                    return;
+                }
+
+                if (inlineForPath === path) {
+                    closeInlinePlayer();
+                }
+
+                location.reload();
+            } catch (_) {
+                alert("Ошибка удаления");
+            }
+        }
+
+        async function clearDirectory(encodedDir) {
+            const dir = decodeURIComponent(encodedDir);
+
+            if (!confirm("Очистить текущую директорию?\n" + dir)) {
+                return;
+            }
+
+            try {
+                const r = await fetch("/api/clear_directory", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ dir: dir })
+                });
+
+                const data = await r.json();
+
+                if (!r.ok || !data.ok) {
+                    alert("Ошибка очистки: " + (data.error || r.status));
+                    return;
+                }
+
+                closeInlinePlayer();
+                location.reload();
+            } catch (_) {
+                alert("Ошибка очистки директории");
+            }
+        }
     </script>
 </body>
 </html>
