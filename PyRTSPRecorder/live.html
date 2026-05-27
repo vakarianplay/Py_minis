@@ -2,7 +2,10 @@
 <html lang="ru">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta
+        name="viewport"
+        content="width=device-width,initial-scale=1,maximum-scale=1"
+    >
     <title>RTSP Live</title>
     <style>
         :root {
@@ -50,6 +53,12 @@
             text-decoration: none;
         }
 
+        .topbar .status {
+            margin-left: auto;
+            color: #9aa3b0;
+            font-size: 13px;
+        }
+
         .viewer {
             height: calc(80vh - 44px);
             min-height: 240px;
@@ -58,18 +67,11 @@
             border-bottom: 1px solid var(--line);
         }
 
-        .viewer img {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-            display: block;
-            background: #000;
-        }
-
         .viewer .title {
             position: absolute;
             top: 10px;
             left: 10px;
+            z-index: 5;
             background: rgba(0, 0, 0, 0.55);
             color: #fff;
             border: 1px solid rgba(255, 255, 255, 0.2);
@@ -78,24 +80,41 @@
             font-size: 14px;
         }
 
-        .thumbs-wrap {
-        height: 20vh;
-        min-height: 110px;
-        background: var(--panel);
-        padding: 10px;
-        overflow-x: auto;
-        overflow-y: hidden;
-    }
+        .main-body {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: stretch;
+            justify-content: center;
+            background: #000;
+        }
 
-    .thumbs {
-        display: flex;
-        gap: 10px;
-        height: 100%;
-        width: max-content;
-        min-width: 100%;
-        justify-content: center;
-        align-items: stretch;
-    }
+        .main-body img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+            background: #000;
+        }
+
+        .thumbs-wrap {
+            height: 20vh;
+            min-height: 110px;
+            background: var(--panel);
+            padding: 10px;
+            overflow-x: auto;
+            overflow-y: hidden;
+        }
+
+        .thumbs {
+            display: flex;
+            gap: 10px;
+            height: 100%;
+            width: max-content;
+            min-width: 100%;
+            justify-content: center;
+            align-items: stretch;
+        }
 
         .thumb {
             flex: 0 0 220px;
@@ -107,13 +126,14 @@
             cursor: pointer;
             display: flex;
             flex-direction: column;
+            padding: 0;
         }
 
         .thumb:hover {
             border-color: var(--accent);
         }
 
-        .thumb .thumb-title {
+        .thumb-title {
             height: 28px;
             min-height: 28px;
             font-size: 12px;
@@ -123,11 +143,18 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            text-align: left;
+            background: #202028;
         }
 
-        .thumb img {
-            width: 100%;
+        .thumb-body {
             height: calc(100% - 28px);
+            background: #000;
+        }
+
+        .thumb-body img {
+            width: 100%;
+            height: 100%;
             object-fit: cover;
             display: block;
             background: #000;
@@ -135,7 +162,8 @@
 
         .empty {
             color: var(--muted);
-            padding: 14px;
+            padding: 12px 4px;
+            text-align: center;
         }
     </style>
 </head>
@@ -144,12 +172,12 @@
         <div class="topbar">
             <strong>🔴 Live-режим</strong>
             <a href="/">Архив</a>
-            <span id="status" style="color:#9aa3b0;font-size:13px;"></span>
+            <span id="status" class="status">Инициализация...</span>
         </div>
 
         <div class="viewer">
-            <img id="mainStream" alt="active camera">
             <div class="title" id="mainTitle">Загрузка камер...</div>
+            <div class="main-body" id="mainBody"></div>
         </div>
 
         <div class="thumbs-wrap">
@@ -163,87 +191,112 @@
     <script>
         const state = {
             cameras: [],
-            active: null
+            active: null,
+            cards: new Map()
         };
 
         function streamUrl(cameraName) {
             return "/live/stream/" + encodeURIComponent(cameraName);
         }
 
-        function attachMjpeg(img, url) {
+        function createStreamImg(cam) {
+            const img = document.createElement("img");
+            img.alt = cam;
+
             let retryTimer = null;
 
             const load = () => {
-                img.src = url + (url.includes("?") ? "&" : "?") + "t=" + Date.now();
+                img.src = streamUrl(cam) + "?t=" + Date.now();
             };
 
-            img.onerror = () => {
-                if (retryTimer) clearTimeout(retryTimer);
-                retryTimer = setTimeout(load, 2000);
-            };
+            img.addEventListener("error", () => {
+                if (retryTimer) {
+                    clearTimeout(retryTimer);
+                }
+                retryTimer = setTimeout(load, 1500);
+            });
 
             load();
+            return img;
         }
 
-        function setActive(cameraName) {
-            state.active = cameraName;
-            renderMain();
-            renderThumbs();
-        }
-
-        function renderMain() {
-            const main = document.getElementById("mainStream");
-            const title = document.getElementById("mainTitle");
-
-            if (!state.active) {
-                title.textContent = "Камеры не найдены";
-                main.removeAttribute("src");
+        function activateCamera(cam) {
+            if (!state.cards.has(cam)) {
+                return;
+            }
+            if (state.active === cam) {
                 return;
             }
 
-            title.textContent = "📷 " + state.active;
-            attachMjpeg(main, streamUrl(state.active));
+            const mainBody = document.getElementById("mainBody");
+            const mainTitle = document.getElementById("mainTitle");
+
+            if (state.active) {
+                const prevEntry = state.cards.get(state.active);
+                const currentMainImg = mainBody.querySelector("img");
+                if (prevEntry && currentMainImg) {
+                    prevEntry.body.appendChild(currentMainImg);
+                    prevEntry.card.style.display = "";
+                }
+            }
+
+            const nextEntry = state.cards.get(cam);
+            mainBody.innerHTML = "";
+            mainBody.appendChild(nextEntry.img);
+            nextEntry.card.style.display = "none";
+
+            state.active = cam;
+            mainTitle.textContent = "📷 " + cam;
         }
 
-        function renderThumbs() {
-            const holder = document.getElementById("thumbs");
+        function buildUI(cameras) {
+            const thumbs = document.getElementById("thumbs");
             const empty = document.getElementById("empty");
-            holder.innerHTML = "";
 
-            const others = state.cameras.filter(c => c !== state.active);
+            thumbs.innerHTML = "";
+            state.cards.clear();
+            state.cameras = cameras.slice();
+            state.active = null;
 
-            if (!state.active) {
+            if (state.cameras.length === 0) {
                 empty.style.display = "block";
-                return;
-            }
-
-            if (others.length === 0) {
-                empty.style.display = "block";
-                empty.textContent = "Подключена только одна камера.";
+                document.getElementById("mainTitle").textContent =
+                    "Камеры не найдены";
+                document.getElementById("mainBody").innerHTML = "";
                 return;
             }
 
             empty.style.display = "none";
 
-            for (const cam of others) {
+            for (const cam of state.cameras) {
                 const card = document.createElement("button");
                 card.className = "thumb";
                 card.type = "button";
                 card.title = "Сделать активной: " + cam;
 
-                const t = document.createElement("div");
-                t.className = "thumb-title";
-                t.textContent = "📷 " + cam;
+                const title = document.createElement("div");
+                title.className = "thumb-title";
+                title.textContent = "📷 " + cam;
 
-                const img = document.createElement("img");
-                img.alt = cam;
-                attachMjpeg(img, streamUrl(cam));
+                const body = document.createElement("div");
+                body.className = "thumb-body";
 
-                card.appendChild(t);
-                card.appendChild(img);
-                card.addEventListener("click", () => setActive(cam));
+                const img = createStreamImg(cam);
+                body.appendChild(img);
 
-                holder.appendChild(card);
+                card.appendChild(title);
+                card.appendChild(body);
+                card.addEventListener("click", () => activateCamera(cam));
+
+                thumbs.appendChild(card);
+                state.cards.set(cam, { card, body, img });
+            }
+
+            activateCamera(state.cameras[0]);
+
+            if (state.cameras.length === 1) {
+                empty.style.display = "block";
+                empty.textContent = "Подключена только одна камера.";
             }
         }
 
@@ -252,29 +305,23 @@
 
             try {
                 status.textContent = "Загрузка списка камер...";
-                const res = await fetch("/live/cameras.json", { cache: "no-store" });
+                const res = await fetch("/live/cameras.json", {
+                    cache: "no-store"
+                });
+
                 if (!res.ok) {
                     throw new Error("HTTP " + res.status);
                 }
 
                 const data = await res.json();
-                state.cameras = Array.isArray(data.cameras) ? data.cameras : [];
+                const cameras = Array.isArray(data.cameras) ? data.cameras : [];
 
-                if (state.cameras.length > 0) {
-                    setActive(state.cameras[0]);
-                    status.textContent = "Камер: " + state.cameras.length;
-                } else {
-                    state.active = null;
-                    renderMain();
-                    renderThumbs();
-                    status.textContent = "Камер: 0";
-                }
+                buildUI(cameras);
+                status.textContent = "Камер: " + cameras.length;
             } catch (e) {
-                status.textContent = "Ошибка загрузки камер";
                 console.error(e);
-                state.active = null;
-                renderMain();
-                renderThumbs();
+                status.textContent = "Ошибка загрузки камер";
+                buildUI([]);
             }
         }
 
