@@ -8,7 +8,11 @@ cameras:
     rtsp_url: rtsp://camera.example/stream2 
   - name: Camera3
     rtsp_url: rtsp://camera.example/stream3
-    
+
+recorder:
+  reconnect_interval_sec: 5
+  reconnect_max_interval_sec: 60
+
 web_server:
   enabled: true
   port: 8080
