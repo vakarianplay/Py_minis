@@ -132,6 +132,7 @@ class CameraRecorder(Thread):
             finally:
                 self._stop_process()
 
+
             if self.stop_event.is_set():
                 break
 

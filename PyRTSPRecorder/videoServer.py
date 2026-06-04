@@ -99,8 +99,11 @@ class VideoServer:
             logging.info("Server stopped")
         finally:
             server.server_close()
+            if self.live_router:
+                self.live_router.stop()
             self.index_db.stop_background()
             self.index_db.close()
+            
 
     class CustomHandler(BaseHTTPRequestHandler):
         conversion_status = {}
